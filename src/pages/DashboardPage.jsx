@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Bike, Package, Star, TrendingUp, Coffee, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Bike, Package, Star, TrendingUp, Coffee, Wifi, WifiOff, RefreshCw, Navigation } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ridersAPI, ordersAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { getSocket } from '../services/socketService';
+import { startTracking, stopTracking } from '../services/locationService';
 
 const statusConfig = {
   ONLINE:  { label: 'Online', color: 'online', dot: 'green' },
@@ -12,11 +14,13 @@ const statusConfig = {
 
 export default function DashboardPage() {
   const { user, rider, updateRider } = useAuth();
-  const [riderData, setRiderData] = useState(rider || null);
-  const [performance, setPerformance] = useState(null);
+  const [riderData, setRiderData]       = useState(rider || null);
+  const [performance, setPerformance]   = useState(null);
   const [availableOrders, setAvailableOrders] = useState([]);
   const [loadingStatus, setLoadingStatus] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]           = useState(true);
+  const [tracking, setTracking]         = useState(false);
+  const trackingRef = useRef(false);
 
   const fetchData = async () => {
     if (!user?.uid) return;
@@ -30,16 +34,12 @@ export default function DashboardPage() {
         const rd = riderRes.value.data?.data || riderRes.value.data;
         setRiderData(rd);
         updateRider(rd);
+        // Auto-start tracking if rider is online
+        const status = rd?.riderAvailabilityStatus || rd?.status;
+        handleTrackingForStatus(status);
       }
       if (perfRes.status === 'fulfilled') {
         setPerformance(perfRes.value.data?.data || perfRes.value.data);
-      }
-      // Fetch available orders if online
-      if (riderData?.status === 'ONLINE' || riderRes.value?.data?.data?.status === 'ONLINE') {
-        try {
-          const ordRes = await ordersAPI.getAvailable();
-          setAvailableOrders(ordRes.data?.data || []);
-        } catch (_) {}
       }
     } catch (_) {
       toast.error('Failed to load rider data');
@@ -50,29 +50,53 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchData(); }, [user?.uid]);
 
+  // Cleanup tracking on unmount
+  useEffect(() => {
+    return () => {
+      if (trackingRef.current) stopTracking();
+    };
+  }, []);
+
+  const handleTrackingForStatus = (status) => {
+    const socket = getSocket();
+    const shouldTrack = status === 'ONLINE' || status === 'AVAILABLE';
+    if (shouldTrack && !trackingRef.current && socket) {
+      startTracking(socket);
+      trackingRef.current = true;
+      setTracking(true);
+    } else if (!shouldTrack && trackingRef.current) {
+      stopTracking();
+      trackingRef.current = false;
+      setTracking(false);
+    }
+  };
+
   const changeStatus = async (action) => {
     if (!user?.uid) return;
     setLoadingStatus(true);
     try {
       let res;
-      if (action === 'online') res = await ridersAPI.goOnline(user.uid);
+      if (action === 'online')  res = await ridersAPI.goOnline(user.uid);
       else if (action === 'offline') res = await ridersAPI.goOffline(user.uid);
-      else if (action === 'break') res = await ridersAPI.takeBreak(user.uid);
-      else if (action === 'resume') res = await ridersAPI.resume(user.uid);
+      else if (action === 'break')   res = await ridersAPI.takeBreak(user.uid);
+      else if (action === 'resume')  res = await ridersAPI.resume(user.uid);
 
       const updated = res.data?.data || res.data;
-      if (updated) { setRiderData(updated); updateRider(updated); }
-      toast.success(`Status updated`);
+      if (updated) {
+        setRiderData(updated);
+        updateRider(updated);
+        const status = updated?.riderAvailabilityStatus || updated?.status;
+        handleTrackingForStatus(status);
+      }
+      toast.success('Status updated');
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to update status');
     } finally { setLoadingStatus(false); }
   };
 
-  const currentStatus = riderData?.status || 'OFFLINE';
+  const currentStatus = riderData?.riderAvailabilityStatus || riderData?.status || 'OFFLINE';
   const statusCfg = statusConfig[currentStatus] || statusConfig.OFFLINE;
-
-  // Onboarding not approved
   const notApproved = riderData && riderData.onboardingStatus !== 'APPROVED';
 
   if (loading) return <div className="loading-center"><div className="loader" /></div>;
@@ -94,10 +118,7 @@ export default function DashboardPage() {
 
       {/* Onboarding warning */}
       {notApproved && (
-        <div className="card mb-12" style={{
-          background: 'var(--orange-dim)', borderColor: 'rgba(255,154,60,0.2)',
-          marginBottom: 12
-        }}>
+        <div className="card mb-12" style={{ background: 'var(--orange-dim)', borderColor: 'rgba(255,154,60,0.2)', marginBottom: 12 }}>
           <div className="flex items-center gap-10">
             <Bike size={18} style={{ color: 'var(--orange)', flexShrink: 0 }} />
             <div>
@@ -127,7 +148,7 @@ export default function DashboardPage() {
                   <Wifi size={13} /> Go Online
                 </button>
               )}
-              {currentStatus === 'ONLINE' && (
+              {(currentStatus === 'ONLINE' || currentStatus === 'AVAILABLE') && (
                 <>
                   <button className="btn btn-secondary btn-sm" onClick={() => changeStatus('break')} disabled={loadingStatus}>
                     <Coffee size={13} /> Break
@@ -150,9 +171,24 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-        {currentStatus === 'ONLINE' && (
-          <div style={{ fontSize: 12, color: 'var(--green)', fontFamily: 'var(--font-mono)' }}>
-            ● You are visible to customers and receiving orders
+
+        {/* Tracking indicator */}
+        {(currentStatus === 'ONLINE' || currentStatus === 'AVAILABLE') && (
+          <div style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: 'var(--green)', fontFamily: 'var(--font-mono)' }}>
+              ● You are visible to customers and receiving orders
+            </span>
+            {tracking && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'rgba(0,229,160,0.1)', border: '1px solid rgba(0,229,160,0.2)',
+                borderRadius: 6, padding: '2px 7px', fontSize: 10,
+                color: 'var(--accent)', fontFamily: 'var(--font-mono)',
+              }}>
+                <Navigation size={9} style={{ animation: 'pulse 2s ease-in-out infinite' }} />
+                TRACKING
+              </span>
+            )}
           </div>
         )}
         {currentStatus === 'OFFLINE' && (
@@ -183,30 +219,30 @@ export default function DashboardPage() {
             <div className="metric-card">
               <div className="metric-label">Rating</div>
               <div className="metric-value" style={{ color: 'var(--orange)' }}>
-                ★ {performance?.averageRating?.toFixed(1) ?? '—'}
+                ★ {(performance?.rating ?? performance?.averageRating)?.toFixed(1) ?? '—'}
               </div>
-              <div className="metric-sub">{performance?.totalRatings ?? 0} reviews</div>
+              <div className="metric-sub">{performance?.totalRatingsCount ?? performance?.totalRatings ?? 0} reviews</div>
             </div>
             <div className="metric-card">
-              <div className="metric-label">Cancelled</div>
-              <div className="metric-value">{performance?.cancelledOrders ?? 0}</div>
-              <div className="metric-sub">Total cancels</div>
-            </div>
-            <div className="metric-card">
-              <div className="metric-label">Success Rate</div>
+              <div className="metric-label">Success</div>
               <div className="metric-value" style={{ color: 'var(--accent)' }}>
-                {performance?.totalDeliveries && performance?.cancelledOrders !== undefined
-                  ? `${Math.round((performance.totalDeliveries / (performance.totalDeliveries + performance.cancelledOrders)) * 100) || 100}%`
-                  : '—'}
+                {performance?.successRate != null ? `${performance.successRate}%` : '—'}
               </div>
               <div className="metric-sub">Completion</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-label">Earnings</div>
+              <div className="metric-value" style={{ color: 'var(--green)', fontSize: 13 }}>
+                ₹{(performance?.totalEarnings ?? 0).toLocaleString('en-IN')}
+              </div>
+              <div className="metric-sub">Total</div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Available orders snippet */}
-      {currentStatus === 'ONLINE' && (
+      {/* Available orders */}
+      {(currentStatus === 'ONLINE' || currentStatus === 'AVAILABLE') && (
         <div className="card">
           <div className="flex items-center justify-between mb-12">
             <div className="section-header" style={{ marginBottom: 0 }}>
@@ -242,6 +278,10 @@ export default function DashboardPage() {
           )}
         </div>
       )}
+
+      <style>{`
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+      `}</style>
     </div>
   );
 }
