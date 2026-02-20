@@ -50,6 +50,11 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
   useEffect(() => {
     if (!accessToken) return;
 
+    // BUG FIX: Disconnect any stale socket before creating a new one.
+    // Previously, if accessToken changed (e.g. after token refresh), the old
+    // socket kept running and the new one would silently fail to connect.
+    disconnectSocket();
+
     const socket = connectSocket(accessToken);
     socketRef.current = socket;
 
@@ -88,6 +93,8 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
     fetchNotifications();
 
     return () => {
+      // BUG FIX: clean up specific listeners (don't destroy socket here —
+      // that's handled by the accessToken=null cleanup effect below)
       socket.off('notification:new');
       socket.off('notification:count');
     };

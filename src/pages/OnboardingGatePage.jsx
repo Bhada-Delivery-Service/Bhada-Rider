@@ -1,30 +1,155 @@
-import React, { useState, useEffect } from 'react';
-import { User, Car, FileText, Send, CheckCircle, RefreshCw, LogOut, X } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  User, Car, FileText, Send, CheckCircle, RefreshCw,
+  LogOut, X, Camera, Eye, Loader,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
-import { ridersAPI } from '../services/api';
+import { ridersAPI, filesAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { getSocket } from '../services/socketService';
 
-/* ─── Modals ─────────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────────
+   ImageUploadField — tap-to-upload with preview, supports camera on mobile
+──────────────────────────────────────────────────────────────────────────────*/
+function ImageUploadField({ label, value, onChange, required = false }) {
+  const inputRef = useRef();
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState(value || null);
+  const [lightbox, setLightbox] = useState(false);
 
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { toast.error('Please select an image'); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error('Max file size is 5 MB'); return; }
+
+    // Instant local preview
+    const localUrl = URL.createObjectURL(file);
+    setPreview(localUrl);
+    setUploading(true);
+
+    try {
+      const { data } = await filesAPI.upload(file);
+      // handle various response shapes the backend may use
+      const url = data?.data?.url ?? data?.url ?? data?.fileUrl ?? data?.data?.fileUrl;
+      if (!url) throw new Error('No URL in response');
+      setPreview(url);
+      onChange(url);
+      toast.success('Photo uploaded');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Upload failed');
+      setPreview(value || null);
+      onChange(value || '');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{
+        display: 'block', fontSize: 11, fontFamily: 'var(--font-mono)',
+        color: 'var(--text-2)', letterSpacing: '0.06em',
+        textTransform: 'uppercase', marginBottom: 8,
+      }}>
+        {label}{required && <span style={{ color: 'var(--red)' }}> *</span>}
+      </label>
+
+      <div
+        onClick={() => !uploading && inputRef.current?.click()}
+        style={{
+          position: 'relative', borderRadius: 10, overflow: 'hidden',
+          border: `1.5px dashed ${preview ? 'rgba(54,211,153,0.5)' : 'var(--border-bright)'}`,
+          background: 'var(--bg-2)', cursor: uploading ? 'wait' : 'pointer',
+          minHeight: 88, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'border-color 0.2s',
+        }}
+      >
+        {uploading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: 20 }}>
+            <Loader size={22} style={{ color: 'var(--accent)', animation: 'ksp 0.8s linear infinite' }} />
+            <span style={{ fontSize: 12, color: 'var(--text-2)' }}>Uploading…</span>
+          </div>
+        ) : preview ? (
+          <>
+            <img src={preview} alt={label}
+              style={{ width: '100%', maxHeight: 150, objectFit: 'cover', display: 'block' }} />
+            <div style={{
+              position: 'absolute', bottom: 6, right: 6, display: 'flex', gap: 6,
+            }}>
+              <button type="button"
+                onClick={e => { e.stopPropagation(); setLightbox(true); }}
+                style={overlayBtn}
+              ><Eye size={11} /> View</button>
+              <button type="button"
+                onClick={e => { e.stopPropagation(); inputRef.current?.click(); }}
+                style={overlayBtn}
+              ><Camera size={11} /> Change</button>
+            </div>
+          </>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: 20 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--bg-3)', display: 'grid', placeItems: 'center' }}>
+              <Camera size={20} style={{ color: 'var(--text-2)' }} />
+            </div>
+            <span style={{ fontSize: 12, color: 'var(--text-1)' }}>Tap to upload photo</span>
+            <span style={{ fontSize: 10, color: 'var(--text-2)' }}>JPG / PNG · max 5 MB</span>
+          </div>
+        )}
+      </div>
+
+      <input ref={inputRef} type="file" accept="image/*" capture="environment"
+        style={{ display: 'none' }} onChange={handleFile} />
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div onClick={() => setLightbox(false)} style={{
+          position: 'fixed', inset: 0, zIndex: 999,
+          background: 'rgba(0,0,0,0.92)', display: 'grid', placeItems: 'center',
+        }}>
+          <img src={preview} alt={label}
+            style={{ maxWidth: '90vw', maxHeight: '84vh', borderRadius: 10, objectFit: 'contain' }}
+            onClick={e => e.stopPropagation()} />
+          <button onClick={() => setLightbox(false)}
+            style={{ position: 'absolute', top: 18, right: 18, ...overlayBtn }}>
+            <X size={13} /> Close
+          </button>
+        </div>
+      )}
+      <style>{`@keyframes ksp{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
+const overlayBtn = {
+  display: 'inline-flex', alignItems: 'center', gap: 4,
+  background: 'rgba(13,18,32,0.82)', border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 6, padding: '4px 9px', color: '#f0f4ff',
+  fontSize: 11, cursor: 'pointer',
+};
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Modals
+──────────────────────────────────────────────────────────────────────────────*/
 function ProfileModal({ riderData, uid, onClose, onSave }) {
   const [form, setForm] = useState({
     firstName: riderData?.firstName || '',
     lastName: riderData?.lastName || '',
     email: riderData?.email || '',
   });
-  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     if (!form.firstName.trim()) { toast.error('First name is required'); return; }
-    setLoading(true);
+    setSaving(true);
     try {
       await ridersAPI.updateProfile(uid, form);
       toast.success('Profile saved!');
-      onSave();
-      onClose();
+      onSave(); onClose();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Update failed');
-    } finally { setLoading(false); }
+    } finally { setSaving(false); }
   };
 
   return (
@@ -36,8 +161,8 @@ function ProfileModal({ riderData, uid, onClose, onSave }) {
         </div>
         <div className="form-group">
           <label className="form-label">First Name *</label>
-          <input className="form-input" value={form.firstName}
-            onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} autoFocus />
+          <input className="form-input" value={form.firstName} autoFocus
+            onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} />
         </div>
         <div className="form-group">
           <label className="form-label">Last Name</label>
@@ -51,8 +176,8 @@ function ProfileModal({ riderData, uid, onClose, onSave }) {
         </div>
         <div className="flex gap-8">
           <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={loading}>
-            {loading ? 'Saving...' : 'Save'}
+          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>
@@ -60,21 +185,28 @@ function ProfileModal({ riderData, uid, onClose, onSave }) {
   );
 }
 
-function VehicleModal({ uid, onClose, onSave }) {
-  const [form, setForm] = useState({ vehicleType: 'BIKE', vehicleNumber: '' });
-  const [loading, setLoading] = useState(false);
+function VehicleModal({ uid, riderData, onClose, onSave }) {
+  // BUG FIX: vehicle is now in nested rd.vehicle object; fall back to flat fields for legacy compat
+  const existingVehicle = riderData?.vehicle || {
+    vehicleType: riderData?.vehicleType,
+    vehicleNumber: riderData?.vehicleNumber,
+  };
+  const [form, setForm] = useState({
+    vehicleType: existingVehicle?.vehicleType || 'BIKE',
+    vehicleNumber: existingVehicle?.vehicleNumber || '',
+  });
+  const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     if (!form.vehicleNumber.trim()) { toast.error('Enter vehicle number'); return; }
-    setLoading(true);
+    setSaving(true);
     try {
       await ridersAPI.submitVehicle(uid, form);
       toast.success('Vehicle submitted!');
-      onSave();
-      onClose();
+      onSave(); onClose();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to submit vehicle');
-    } finally { setLoading(false); }
+    } finally { setSaving(false); }
   };
 
   return (
@@ -102,8 +234,8 @@ function VehicleModal({ uid, onClose, onSave }) {
         </div>
         <div className="flex gap-8">
           <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={loading}>
-            {loading ? 'Submitting...' : 'Submit Vehicle'}
+          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={saving}>
+            {saving ? 'Submitting…' : 'Submit Vehicle'}
           </button>
         </div>
       </div>
@@ -111,53 +243,96 @@ function VehicleModal({ uid, onClose, onSave }) {
   );
 }
 
-function KycModal({ uid, onClose, onSave }) {
-  const [form, setForm] = useState({ idProofType: 'AADHAR', idProofNumber: '' });
-  const [loading, setLoading] = useState(false);
+function KycModal({ uid, riderData, onClose, onSave }) {
+  // BUG FIX: kyc data is now in nested rd.kyc object; fall back to flat fields for legacy compat
+  const existing = riderData?.kyc || {
+    idProofType: riderData?.idProofType,
+    idProofNumber: riderData?.idProofNumber,
+    documentUrl: riderData?.documentUrl,
+    documentUrlBack: riderData?.documentUrlBack,
+  };
+  const [form, setForm] = useState({
+    idProofType: existing.idProofType || 'AADHAR',
+    idProofNumber: existing.idProofNumber || '',
+    documentUrl: existing.documentUrl || '',
+    documentUrlBack: existing.documentUrlBack || '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  const needsBack = ['AADHAR', 'DRIVING_LICENCE'].includes(form.idProofType);
 
   const handleSave = async () => {
-    if (!form.idProofNumber.trim()) { toast.error('Enter ID number'); return; }
-    setLoading(true);
+    if (!form.idProofNumber.trim()) { toast.error('Enter your ID number'); return; }
+    if (!form.documentUrl) { toast.error('Please upload a front photo of your ID document'); return; }
+    setSaving(true);
     try {
-      await ridersAPI.submitKyc(uid, form);
-      toast.success('KYC submitted!');
-      onSave();
-      onClose();
+      await ridersAPI.submitKyc(uid, {
+        idProofType: form.idProofType,
+        idProofNumber: form.idProofNumber,
+        documentUrl: form.documentUrl,
+        ...(form.documentUrlBack ? { documentUrlBack: form.documentUrlBack } : {}),
+      });
+      toast.success('KYC submitted! Admin will verify within 24–48 hours.');
+      onSave(); onClose();
     } catch (err) {
       toast.error(err.response?.data?.message || 'KYC submission failed');
-    } finally { setLoading(false); }
+    } finally { setSaving(false); }
   };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ maxHeight: '90vh', overflowY: 'auto' }}
+        onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">KYC Documents</div>
+          <div className="modal-title">KYC Verification</div>
           <button className="modal-close" onClick={onClose}><X size={14} /></button>
         </div>
+
         <div className="form-group">
           <label className="form-label">ID Proof Type</label>
           <select className="form-select" value={form.idProofType}
             onChange={e => setForm(f => ({ ...f, idProofType: e.target.value }))}>
             <option value="AADHAR">Aadhaar Card</option>
             <option value="PAN">PAN Card</option>
-            
             <option value="DRIVING_LICENCE">Driving Licence</option>
-            
           </select>
         </div>
+
         <div className="form-group">
-          <label className="form-label">ID Number</label>
-          <input className="form-input" placeholder="Enter your ID number" value={form.idProofNumber}
+          <label className="form-label">ID Number *</label>
+          <input className="form-input" placeholder="Enter your ID number"
+            value={form.idProofNumber}
             onChange={e => setForm(f => ({ ...f, idProofNumber: e.target.value.toUpperCase() }))} />
         </div>
-        <div style={{ padding: '10px 12px', background: 'var(--blue-dim)', borderRadius: 8, fontSize: 12, color: 'var(--blue)', marginBottom: 16 }}>
-          ℹ️ Documents are verified by admin within 24–48 hours.
+
+        {/* ── Front photo (required) ── */}
+        <ImageUploadField
+          label={`${form.idProofType === 'AADHAR' ? 'Aadhaar' : form.idProofType === 'PAN' ? 'PAN Card' : 'Driving Licence'} — Front Photo`}
+          value={form.documentUrl}
+          onChange={url => setForm(f => ({ ...f, documentUrl: url }))}
+          required
+        />
+
+        {/* ── Back photo (Aadhaar / DL only) ── */}
+        {needsBack && (
+          <ImageUploadField
+            label={`${form.idProofType === 'AADHAR' ? 'Aadhaar' : 'Driving Licence'} — Back Photo (optional)`}
+            value={form.documentUrlBack}
+            onChange={url => setForm(f => ({ ...f, documentUrlBack: url }))}
+          />
+        )}
+
+        <div style={{
+          padding: '10px 12px', background: 'var(--blue-dim)',
+          borderRadius: 8, fontSize: 12, color: 'var(--blue)', marginBottom: 18, lineHeight: 1.5,
+        }}>
+          ℹ️ Make sure all text is clearly visible. Documents are verified within 24–48 hours.
         </div>
+
         <div className="flex gap-8">
           <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={loading}>
-            {loading ? 'Submitting...' : 'Submit KYC'}
+          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={saving}>
+            {saving ? 'Submitting…' : 'Submit KYC'}
           </button>
         </div>
       </div>
@@ -165,16 +340,18 @@ function KycModal({ uid, onClose, onSave }) {
   );
 }
 
-/* ─── Main Page ──────────────────────────────────────────────────────────── */
-
+/* ─────────────────────────────────────────────────────────────────────────────
+   Main Page
+──────────────────────────────────────────────────────────────────────────────*/
 export default function OnboardingGatePage() {
   const { user, logout, updateRider, refreshOnboardingStatus, onboardingStatus } = useAuth();
   const [riderData, setRiderData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [modal, setModal] = useState(null);
+  const [modal, setModal]         = useState(null); // 'profile' | 'vehicle' | 'kyc'
 
-  const fetchRider = async (silent = false) => {
+  /* ── Fetch rider from server ─────────────────────────────────────────────── */
+  const fetchRider = useCallback(async (silent = false) => {
     if (!user?.uid) return;
     if (!silent) setLoading(true);
     try {
@@ -183,23 +360,47 @@ export default function OnboardingGatePage() {
       setRiderData(rd);
       updateRider(rd);
     } catch (err) {
-      // 404 = new rider, no profile yet → show empty onboarding form normally
-      if (err.response?.status === 404) {
-        setRiderData(null);
-      } else {
-        toast.error('Failed to load profile');
+      if (err.response?.status === 404) setRiderData(null);
+      else toast.error('Failed to load profile');
+    } finally { setLoading(false); }
+  }, [user?.uid]); // eslint-disable-line
+
+  useEffect(() => { fetchRider(); }, [fetchRider]);
+
+  /* ── Real-time socket: re-render immediately when admin acts ─────────────── */
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const onNotification = ({ type }) => {
+      if (['KYC_APPROVED', 'KYC_REJECTED', 'ONBOARDING_APPROVED', 'ONBOARDING_REJECTED'].includes(type)) {
+        fetchRider(true);
+        refreshOnboardingStatus();
       }
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
-  useEffect(() => { fetchRider(); }, [user?.uid]);
+    // BUG FIX: listen to rider:updated event emitted by backend after any
+    // vehicle/KYC/onboarding change, so the UI updates in real time without
+    // the rider needing to refresh. The backend now emits this on every mutation.
+    const onRiderUpdated = ({ rider }) => {
+      if (rider) {
+        setRiderData(rider);
+        updateRider(rider);
+      }
+    };
 
+    socket.on('notification:new', onNotification);
+    socket.on('rider:updated', onRiderUpdated);
+    return () => {
+      socket.off('notification:new', onNotification);
+      socket.off('rider:updated', onRiderUpdated);
+    };
+  }, [fetchRider, refreshOnboardingStatus]);
+
+  /* ── Handlers ────────────────────────────────────────────────────────────── */
   const handleRefresh = async () => {
     setRefreshing(true);
-    await refreshOnboardingStatus();
-    await fetchRider(true);
+    await Promise.all([refreshOnboardingStatus(), fetchRider(true)]);
     setRefreshing(false);
     toast.success('Status refreshed');
   };
@@ -208,84 +409,111 @@ export default function OnboardingGatePage() {
     try {
       await ridersAPI.submitOnboarding(user.uid);
       toast.success('Application submitted! Waiting for admin approval.');
-      await fetchRider(true);
-      await refreshOnboardingStatus();
+      await Promise.all([fetchRider(true), refreshOnboardingStatus()]);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Submission failed');
     }
   };
 
+  /* ── Loading splash ──────────────────────────────────────────────────────── */
   if (loading) return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-0)', display: 'grid', placeItems: 'center' }}>
       <div className="loader" />
     </div>
   );
 
-  const rd = riderData;
+  /* ── Derived state ───────────────────────────────────────────────────────── */
+  const rd         = riderData;
   const hasProfile = !!(rd?.firstName);
-  const hasVehicle = !!(rd?.vehicleType && rd?.vehicleNumber);
-  const kycStatus = rd?.kycStatus || 'NOT_SUBMITTED';
-  const obStatus = onboardingStatus || rd?.onboardingStatus || 'NOT_SUBMITTED';
+  // BUG FIX: backend returns nested `vehicle` object — was reading undefined flat fields
+  const hasVehicle = !!(rd?.vehicle?.vehicleType && rd?.vehicle?.vehicleNumber)
+                  || !!(rd?.vehicleType && rd?.vehicleNumber); // backward compat
+  // BUG FIX: kycStatus was compared to 'APPROVED' but backend enum is 'VERIFIED'
+  //          Also support nested `rd.kyc.kycStatus` (new) and flat `rd.kycStatus` (legacy)
+  const rawKycStatus = rd?.kyc?.kycStatus || rd?.kycStatus || 'NOT_SUBMITTED';
+  const kycStatus  = rawKycStatus === 'VERIFIED' ? 'APPROVED' : rawKycStatus;
+  const obStatus   = onboardingStatus || rd?.onboardingStatus || 'NOT_SUBMITTED';
 
+  /* ── Steps definition ────────────────────────────────────────────────────── */
   const steps = [
     {
-      id: 'profile',
-      icon: User,
+      id: 'profile', Icon: User,
       title: 'Personal Details',
       desc: 'Your name and contact information',
       done: hasProfile,
-      action: () => setModal('profile'),
-      actionLabel: 'Complete Profile',
+      pending: false,
+      rejected: false,
+      // Profile can always be re-edited
       canAct: true,
+      label: hasProfile ? 'Edit' : 'Complete Profile',
+      action: () => setModal('profile'),
     },
     {
-      id: 'vehicle',
-      icon: Car,
+      id: 'vehicle', Icon: Car,
       title: 'Vehicle Details',
       desc: 'Vehicle type and registration number',
       done: hasVehicle,
-      action: () => setModal('vehicle'),
-      actionLabel: 'Add Vehicle',
+      pending: false,
+      rejected: false,
       canAct: hasProfile,
+      label: hasVehicle ? 'Edit' : 'Add Vehicle',
+      action: () => setModal('vehicle'),
     },
     {
-      id: 'kyc',
-      icon: FileText,
+      id: 'kyc', Icon: FileText,
       title: 'KYC Verification',
-      desc: 'Government-issued ID document',
+      desc: 'Government-issued ID + photo of document',
       done: kycStatus === 'APPROVED',
       pending: kycStatus === 'PENDING',
-      action: () => setModal('kyc'),
-      actionLabel: kycStatus === 'REJECTED' ? 'Resubmit KYC' : 'Submit KYC',
+      rejected: kycStatus === 'REJECTED',
+      // ✅ FIX: button is HIDDEN when status is APPROVED or PENDING
       canAct: hasVehicle && kycStatus !== 'APPROVED' && kycStatus !== 'PENDING',
+      label: kycStatus === 'REJECTED' ? 'Resubmit KYC' : 'Submit KYC',
+      action: () => setModal('kyc'),
     },
     {
-      id: 'onboarding',
-      icon: Send,
+      id: 'onboarding', Icon: Send,
       title: 'Submit Application',
       desc: 'Send your application for admin review',
       done: obStatus === 'APPROVED',
       pending: obStatus === 'PENDING',
-      action: submitOnboarding,
-      actionLabel: obStatus === 'REJECTED' ? 'Resubmit Application' : 'Submit Application',
+      rejected: obStatus === 'REJECTED',
       canAct: kycStatus === 'APPROVED' && (obStatus === 'NOT_SUBMITTED' || obStatus === 'REJECTED'),
+      label: obStatus === 'REJECTED' ? 'Resubmit Application' : 'Submit Application',
+      action: submitOnboarding,
     },
   ];
 
   const completedCount = steps.filter(s => s.done).length;
   const progress = Math.round((completedCount / steps.length) * 100);
 
+  /* ── Step visual helpers ─────────────────────────────────────────────────── */
+  const stepState = (s) =>
+    s.done ? 'done' : s.pending ? 'pending' : s.rejected ? 'rejected' : s.canAct ? 'active' : 'locked';
+
+  const STATE = {
+    done:     { border: 'rgba(54,211,153,0.2)',  iconBg: 'var(--green-dim)',  iconColor: 'var(--green)' },
+    pending:  { border: 'rgba(255,154,60,0.2)',  iconBg: 'var(--orange-dim)', iconColor: 'var(--orange)' },
+    rejected: { border: 'rgba(255,77,109,0.2)',  iconBg: 'var(--red-dim)',    iconColor: 'var(--red)' },
+    active:   { border: 'rgba(0,229,160,0.25)',  iconBg: 'var(--accent-dim)', iconColor: 'var(--accent)' },
+    locked:   { border: 'var(--border)',          iconBg: 'var(--bg-3)',       iconColor: 'var(--text-2)' },
+  };
+
+  const stateDesc = (s, state) => {
+    if (state === 'done')     return <span style={{ color: 'var(--green)' }}>✓ Verified &amp; complete</span>;
+    if (state === 'pending')  return <span style={{ color: 'var(--orange)' }}>⏳ Under admin review</span>;
+    if (state === 'rejected') return <span style={{ color: 'var(--red)' }}>✗ Rejected — tap to resubmit</span>;
+    return <span style={{ color: 'var(--text-2)' }}>{s.desc}</span>;
+  };
+
+  /* ── Render ──────────────────────────────────────────────────────────────── */
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-0)', display: 'flex', flexDirection: 'column' }}>
 
       {/* Header */}
       <div style={{
-        padding: '16px 20px',
-        background: 'var(--bg-1)',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
+        padding: '16px 20px', background: 'var(--bg-1)', borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
@@ -303,16 +531,15 @@ export default function OnboardingGatePage() {
         </button>
       </div>
 
-      {/* Content */}
+      {/* Body */}
       <div style={{ flex: 1, padding: '24px 16px', maxWidth: 480, margin: '0 auto', width: '100%' }}>
 
-        {/* Welcome */}
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 4 }}>
             Welcome{rd?.firstName ? `, ${rd.firstName}` : ''}! 👋
           </div>
           <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
-            Complete the steps below to start delivering with Bhada.
+            Complete all steps below to start delivering with Bhada.
           </div>
         </div>
 
@@ -324,10 +551,8 @@ export default function OnboardingGatePage() {
           </div>
           <div style={{ height: 6, background: 'var(--bg-3)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{
-              height: '100%', width: `${progress}%`,
-              background: 'var(--accent)', borderRadius: 99,
-              transition: 'width 0.4s ease',
-              boxShadow: '0 0 10px var(--accent-glow)',
+              height: '100%', width: `${progress}%`, background: 'var(--accent)', borderRadius: 99,
+              transition: 'width 0.4s ease', boxShadow: '0 0 10px var(--accent-glow)',
             }} />
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 6 }}>
@@ -335,85 +560,64 @@ export default function OnboardingGatePage() {
           </div>
         </div>
 
-        {/* Status banners */}
+        {/* Banners */}
         {obStatus === 'PENDING' && (
-          <div style={{
-            padding: '14px 16px', marginBottom: 20,
-            background: 'var(--orange-dim)', border: '1px solid rgba(255,154,60,0.2)',
-            borderRadius: 12, display: 'flex', alignItems: 'flex-start', gap: 12,
-          }}>
-            <div style={{ fontSize: 20, flexShrink: 0 }}>⏳</div>
+          <div style={{ padding: '14px 16px', marginBottom: 20, background: 'var(--orange-dim)', border: '1px solid rgba(255,154,60,0.2)', borderRadius: 12, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>⏳</span>
             <div>
               <div style={{ fontWeight: 600, color: 'var(--orange)', marginBottom: 3 }}>Application Under Review</div>
               <div style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.5 }}>
-                Your application has been submitted. Admin will review it within 24–48 hours. Tap below to check for updates.
+                You'll be notified instantly when approved. Tap to manually refresh.
               </div>
-              <button
-                className="btn btn-sm"
+              <button className="btn btn-sm"
                 style={{ marginTop: 10, background: 'var(--orange-dim)', color: 'var(--orange)', border: '1px solid rgba(255,154,60,0.3)' }}
-                onClick={handleRefresh}
-                disabled={refreshing}
-              >
-                <RefreshCw size={12} style={{ animation: refreshing ? 'spin 0.7s linear infinite' : 'none' }} />
-                {refreshing ? 'Checking...' : 'Check Status'}
+                onClick={handleRefresh} disabled={refreshing}>
+                <RefreshCw size={12} style={{ animation: refreshing ? 'ksp 0.7s linear infinite' : 'none' }} />
+                {refreshing ? 'Checking…' : 'Check Status'}
               </button>
             </div>
           </div>
         )}
 
         {obStatus === 'REJECTED' && (
-          <div style={{
-            padding: '14px 16px', marginBottom: 20,
-            background: 'var(--red-dim)', border: '1px solid rgba(255,77,109,0.2)',
-            borderRadius: 12, display: 'flex', alignItems: 'flex-start', gap: 12,
-          }}>
-            <div style={{ fontSize: 20, flexShrink: 0 }}>✗</div>
+          <div style={{ padding: '14px 16px', marginBottom: 20, background: 'var(--red-dim)', border: '1px solid rgba(255,77,109,0.2)', borderRadius: 12, display: 'flex', gap: 12 }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>✗</span>
             <div>
               <div style={{ fontWeight: 600, color: 'var(--red)', marginBottom: 3 }}>Application Rejected</div>
-              <div style={{ fontSize: 12, color: 'var(--text-1)' }}>
-                Your application was rejected. Please update your details and resubmit below.
-              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-1)' }}>Update your details and resubmit below.</div>
+            </div>
+          </div>
+        )}
+
+        {kycStatus === 'REJECTED' && obStatus !== 'REJECTED' && (
+          <div style={{ padding: '14px 16px', marginBottom: 20, background: 'var(--red-dim)', border: '1px solid rgba(255,77,109,0.2)', borderRadius: 12, display: 'flex', gap: 12 }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>⚠️</span>
+            <div>
+              <div style={{ fontWeight: 600, color: 'var(--red)', marginBottom: 3 }}>KYC Rejected</div>
+              <div style={{ fontSize: 12, color: 'var(--text-1)' }}>Resubmit with a clear, readable photo of your ID.</div>
             </div>
           </div>
         )}
 
         {/* Steps */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-          {steps.map((step) => {
-            const Icon = step.icon;
-            const state = step.done ? 'done'
-              : step.pending ? 'pending-review'
-              : step.canAct ? 'active'
-              : 'locked';
+          {steps.map(step => {
+            const state  = stepState(step);
+            const visual = STATE[state];
+            const { Icon } = step;
 
             return (
               <div key={step.id} style={{
-                background: 'var(--bg-1)',
-                border: `1px solid ${
-                  state === 'active' ? 'rgba(0,229,160,0.25)'
-                  : state === 'done' ? 'rgba(54,211,153,0.15)'
-                  : 'var(--border)'
-                }`,
-                borderRadius: 12,
-                padding: '14px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 14,
-                opacity: state === 'locked' ? 0.5 : 1,
-                transition: 'all 0.2s ease',
+                background: 'var(--bg-1)', border: `1px solid ${visual.border}`,
+                borderRadius: 12, padding: '14px 16px',
+                display: 'flex', alignItems: 'center', gap: 14,
+                opacity: state === 'locked' ? 0.5 : 1, transition: 'all 0.2s ease',
               }}>
-                {/* Step icon */}
+                {/* Icon */}
                 <div style={{
                   width: 40, height: 40, borderRadius: 10, flexShrink: 0,
                   display: 'grid', placeItems: 'center',
-                  background: state === 'done' ? 'var(--green-dim)'
-                    : state === 'active' ? 'var(--accent-dim)'
-                    : state === 'pending-review' ? 'var(--orange-dim)'
-                    : 'var(--bg-3)',
-                  color: state === 'done' ? 'var(--green)'
-                    : state === 'active' ? 'var(--accent)'
-                    : state === 'pending-review' ? 'var(--orange)'
-                    : 'var(--text-2)',
+                  background: visual.iconBg, color: visual.iconColor,
                 }}>
                   {state === 'done' ? <CheckCircle size={18} /> : <Icon size={18} />}
                 </div>
@@ -423,24 +627,29 @@ export default function OnboardingGatePage() {
                   <div style={{ fontWeight: 600, fontSize: 14, color: state === 'locked' ? 'var(--text-2)' : 'var(--text-0)', marginBottom: 2 }}>
                     {step.title}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
-                    {step.pending
-                      ? <span style={{ color: 'var(--orange)' }}>⏳ Under admin review</span>
-                      : step.done
-                      ? <span style={{ color: 'var(--green)' }}>✓ Completed</span>
-                      : step.desc}
-                  </div>
+                  <div style={{ fontSize: 12 }}>{stateDesc(step, state)}</div>
+
+                  {/* KYC doc preview link when submitted */}
+                  {step.id === 'kyc' && (rd?.kyc?.documentUrl || rd?.documentUrl) && (state === 'done' || state === 'pending') && (
+                    <a href={rd.kyc?.documentUrl || rd.documentUrl} target="_blank" rel="noreferrer"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 5, fontSize: 10, color: 'var(--blue)', background: 'var(--blue-dim)', padding: '2px 8px', borderRadius: 4, textDecoration: 'none' }}>
+                      <Eye size={9} /> View submitted doc
+                    </a>
+                  )}
                 </div>
 
-                {/* CTA */}
-                {!step.done && !step.pending && step.canAct && (
-                  <button className="btn btn-primary btn-sm" style={{ flexShrink: 0, fontSize: 12 }} onClick={step.action}>
-                    {step.actionLabel}
+                {/* ✅ Action button — never shown when done OR pending */}
+                {step.canAct && !step.done && !step.pending && (
+                  <button
+                    className={`btn btn-sm ${state === 'rejected' ? 'btn-danger' : 'btn-primary'}`}
+                    style={{ flexShrink: 0, fontSize: 12 }}
+                    onClick={step.action}
+                  >
+                    {step.label}
                   </button>
                 )}
-                {state === 'locked' && (
-                  <div style={{ fontSize: 18, flexShrink: 0 }}>🔒</div>
-                )}
+
+                {state === 'locked' && <span style={{ fontSize: 18, flexShrink: 0 }}>🔒</span>}
               </div>
             );
           })}
@@ -456,11 +665,13 @@ export default function OnboardingGatePage() {
         <ProfileModal uid={user.uid} riderData={rd} onClose={() => setModal(null)} onSave={() => fetchRider(true)} />
       )}
       {modal === 'vehicle' && (
-        <VehicleModal uid={user.uid} onClose={() => setModal(null)} onSave={() => fetchRider(true)} />
+        <VehicleModal uid={user.uid} riderData={rd} onClose={() => setModal(null)} onSave={() => fetchRider(true)} />
       )}
       {modal === 'kyc' && (
-        <KycModal uid={user.uid} onClose={() => setModal(null)} onSave={() => fetchRider(true)} />
+        <KycModal uid={user.uid} riderData={rd} onClose={() => setModal(null)} onSave={() => fetchRider(true)} />
       )}
+
+      <style>{`@keyframes ksp{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }
