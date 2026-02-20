@@ -38,7 +38,7 @@ api.interceptors.response.use(
 
 // ─── Auth ──────────────────────────────────────────────────────────────────
 export const authAPI = {
-  verifyFirebase: (idToken) => api.post('/auth/verify-firebase', { idToken ,role: 'rider' }),
+  verifyFirebase: (idToken) => api.post('/auth/verify-firebase', { idToken, role: 'rider' }),
   refreshToken: (refreshToken) => api.post('/auth/refresh-token', { refreshToken }),
   checkSession: () => api.get('/auth/check-session'),
 };
@@ -88,6 +88,14 @@ export const filesAPI = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+};
+
+// ─── Notifications ─────────────────────────────────────────────────────────
+export const notificationsAPI = {
+  getAll:      (limit = 30) => api.get(`/notifications?limit=${limit}`),
+  getCount:    ()           => api.get('/notifications/count'),
+  markSeen:    (id)         => api.put(`/notifications/${id}/seen`),
+  markAllSeen: ()           => api.put('/notifications/seen-all'),
 };
 
 export default api;
