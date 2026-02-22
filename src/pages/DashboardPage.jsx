@@ -1,27 +1,35 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Bike, Package, Star, TrendingUp, Coffee, Wifi, WifiOff, RefreshCw, Navigation } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ridersAPI, ordersAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { getSocket } from '../services/socketService';
-import { startTracking, stopTracking } from '../services/locationService';
+import { startTracking, stopTracking, warmupGPS } from '../services/locationService';
 
+// BUG FIX 1: Added 'AVAILABLE' to statusConfig.
+// The backend sets riderAvailabilityStatus = 'AVAILABLE' (not 'ONLINE') when goOnline() is called.
+// Previously statusConfig had no 'AVAILABLE' key, so statusConfig['AVAILABLE'] returned undefined,
+// falling back to statusConfig.OFFLINE → the pill always showed "Offline" after going online.
 const statusConfig = {
-  ONLINE:  { label: 'Online', color: 'online', dot: 'green' },
-  OFFLINE: { label: 'Offline', color: 'offline', dot: 'red' },
-  ON_BREAK:{ label: 'On Break', color: 'break', dot: 'orange' },
+  ONLINE:    { label: 'Online',   color: 'online',  dot: 'green'  },
+  AVAILABLE: { label: 'Online',   color: 'online',  dot: 'green'  }, // ← ADDED
+  OFFLINE:   { label: 'Offline',  color: 'offline', dot: 'red'    },
+  ON_BREAK:  { label: 'On Break', color: 'break',   dot: 'orange' },
+  BUSY:      { label: 'Busy',     color: 'online',  dot: 'green'  }, // ← ADDED for completeness
 };
 
 export default function DashboardPage() {
   const { user, rider, updateRider } = useAuth();
-  const [riderData, setRiderData]       = useState(rider || null);
-  const [performance, setPerformance]   = useState(null);
+  const [riderData, setRiderData]         = useState(rider || null);
+  const [performance, setPerformance]     = useState(null);
   const [availableOrders, setAvailableOrders] = useState([]);
   const [loadingStatus, setLoadingStatus] = useState(false);
-  const [loading, setLoading]           = useState(true);
-  const [tracking, setTracking]         = useState(false);
-  const trackingRef = useRef(false);
+  const [loading, setLoading]             = useState(true);
+  const [tracking, setTracking]           = useState(false);
+  const trackingRef    = useRef(false);
+  const retryTimerRef  = useRef(null); // BUG FIX 2: for socket-retry cleanup
 
+  // ── Fetch rider + performance data ───────────────────────────────────────
   const fetchData = async () => {
     if (!user?.uid) return;
     setLoading(true);
@@ -34,7 +42,6 @@ export default function DashboardPage() {
         const rd = riderRes.value.data?.data || riderRes.value.data;
         setRiderData(rd);
         updateRider(rd);
-        // Auto-start tracking if rider is online
         const status = rd?.riderAvailabilityStatus || rd?.status;
         handleTrackingForStatus(status);
       }
@@ -50,27 +57,65 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchData(); }, [user?.uid]);
 
-  // Cleanup tracking on unmount
+  // Pre-warm GPS so the browser has a cached position before the rider taps "Go Online"
+  useEffect(() => { warmupGPS(); }, []);
+
+  // Cleanup on unmount: stop tracking and cancel any pending retry timer.
+  // IMPORTANT: reset trackingRef.current to false so that when React StrictMode
+  // (or real navigation) remounts this component, handleTrackingForStatus() will
+  // call startTracking() again. Without this reset, trackingRef stays true across
+  // the unmount/remount cycle and startTracking() is never called again — leaving
+  // the interval dead and no location emits after the very first one.
   useEffect(() => {
     return () => {
-      if (trackingRef.current) stopTracking();
+      if (trackingRef.current) {
+        stopTracking();
+        trackingRef.current = false; // ← CRITICAL: allow startTracking() on remount
+      }
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
     };
   }, []);
 
-  const handleTrackingForStatus = (status) => {
-    const socket = getSocket();
-    const shouldTrack = status === 'ONLINE' || status === 'AVAILABLE';
-    if (shouldTrack && !trackingRef.current && socket) {
-      startTracking(socket);
-      trackingRef.current = true;
-      setTracking(true);
+  // ── BUG FIX 2: handleTrackingForStatus with socket-ready retry ───────────
+  // Previously, if getSocket() returned null (socket not yet created by NotificationContext)
+  // OR the socket existed but wasn't connected yet, the first GPS emit was silently dropped
+  // and tracking stayed in "ACQUIRING GPS…" forever.
+  //
+  // Fix: if socket is null → retry in 500ms.
+  // If socket exists but not connected → startTracking handles it internally via
+  // socket.once('connect') in locationService.js (see that file's fix).
+  const handleTrackingForStatus = useCallback((status) => {
+    const shouldTrack = status === 'ONLINE' || status === 'AVAILABLE' || status === 'BUSY';
+
+    if (shouldTrack && !trackingRef.current) {
+      const socket = getSocket();
+      if (socket) {
+        // locationService handles both connected and still-connecting sockets correctly.
+        startTracking(socket, () => setTracking(true));
+        trackingRef.current = true;
+        if (retryTimerRef.current) {
+          clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
+      } else {
+        // Socket not created yet (NotificationContext still mounting) — retry.
+        console.warn('[Dashboard] Socket not ready yet — retrying in 300ms');
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          handleTrackingForStatus(status);
+        }, 300);
+      }
     } else if (!shouldTrack && trackingRef.current) {
       stopTracking();
       trackingRef.current = false;
       setTracking(false);
     }
-  };
+  }, []);
 
+  // ── Change availability status ────────────────────────────────────────────
   const changeStatus = async (action) => {
     if (!user?.uid) return;
     setLoadingStatus(true);
@@ -89,15 +134,23 @@ export default function DashboardPage() {
         handleTrackingForStatus(status);
       }
       toast.success('Status updated');
-      fetchData();
+      // BUG FIX 3: Don't call fetchData() immediately after changeStatus.
+      // fetchData() sets loading=true which triggers a full re-render and re-calls
+      // handleTrackingForStatus from the fetched data — this causes a race where
+      // trackingRef.current is already true (set above) but the freshly fetched
+      // riderData might briefly show stale status during the loading state.
+      // The updated object from the API response is already correct; no need to re-fetch.
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to update status');
-    } finally { setLoadingStatus(false); }
+    } finally {
+      setLoadingStatus(false);
+    }
   };
 
   const currentStatus = riderData?.riderAvailabilityStatus || riderData?.status || 'OFFLINE';
   const statusCfg = statusConfig[currentStatus] || statusConfig.OFFLINE;
   const notApproved = riderData && riderData.onboardingStatus !== 'APPROVED';
+  const isOnline = currentStatus === 'ONLINE' || currentStatus === 'AVAILABLE' || currentStatus === 'BUSY';
 
   if (loading) return <div className="loading-center"><div className="loader" /></div>;
 
@@ -148,7 +201,7 @@ export default function DashboardPage() {
                   <Wifi size={13} /> Go Online
                 </button>
               )}
-              {(currentStatus === 'ONLINE' || currentStatus === 'AVAILABLE') && (
+              {isOnline && (
                 <>
                   <button className="btn btn-secondary btn-sm" onClick={() => changeStatus('break')} disabled={loadingStatus}>
                     <Coffee size={13} /> Break
@@ -173,12 +226,12 @@ export default function DashboardPage() {
         </div>
 
         {/* Tracking indicator */}
-        {(currentStatus === 'ONLINE' || currentStatus === 'AVAILABLE') && (
+        {isOnline && (
           <div style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ color: 'var(--green)', fontFamily: 'var(--font-mono)' }}>
               ● You are visible to customers and receiving orders
             </span>
-            {tracking && (
+            {tracking ? (
               <span style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 background: 'rgba(0,229,160,0.1)', border: '1px solid rgba(0,229,160,0.2)',
@@ -186,7 +239,17 @@ export default function DashboardPage() {
                 color: 'var(--accent)', fontFamily: 'var(--font-mono)',
               }}>
                 <Navigation size={9} style={{ animation: 'pulse 2s ease-in-out infinite' }} />
-                TRACKING
+                GPS ACTIVE
+              </span>
+            ) : (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'rgba(255,225,77,0.1)', border: '1px solid rgba(255,225,77,0.2)',
+                borderRadius: 6, padding: '2px 7px', fontSize: 10,
+                color: '#ffe14d', fontFamily: 'var(--font-mono)',
+              }}>
+                <Navigation size={9} style={{ animation: 'pulse 1s ease-in-out infinite' }} />
+                ACQUIRING GPS…
               </span>
             )}
           </div>
@@ -242,7 +305,7 @@ export default function DashboardPage() {
       )}
 
       {/* Available orders */}
-      {(currentStatus === 'ONLINE' || currentStatus === 'AVAILABLE') && (
+      {isOnline && (
         <div className="card">
           <div className="flex items-center justify-between mb-12">
             <div className="section-header" style={{ marginBottom: 0 }}>

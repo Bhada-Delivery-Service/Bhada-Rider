@@ -1,8 +1,113 @@
 import React, { useState, useEffect } from 'react';
-import { User, Car, FileText, Send, CheckCircle, Clock, XCircle, RefreshCw, ChevronRight, Edit2, X } from 'lucide-react';
+import { User, Car, FileText, Send, CheckCircle, Clock, XCircle, RefreshCw, ChevronRight, Edit2, X, Banknote } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ridersAPI, filesAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+
+function BankAccountModal({ uid, riderData, onClose, onSave }) {
+  const [form, setForm] = useState({
+    bankAccountHolderName: riderData?.bankAccountHolderName || '',
+    bankAccountNumber: riderData?.bankAccountNumber || '',
+    bankIfscCode: riderData?.bankIfscCode || '',
+    bankName: riderData?.bankName || '',
+    upiId: riderData?.upiId || '',
+  });
+  const [mode, setMode] = useState(
+    riderData?.upiId && !riderData?.bankAccountNumber ? 'upi' : 'bank'
+  );
+  const [loading, setLoading] = useState(false);
+
+  const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    if (mode === 'bank') {
+      if (!form.bankAccountHolderName.trim()) { toast.error('Enter account holder name'); return; }
+      if (!form.bankAccountNumber.trim()) { toast.error('Enter bank account number'); return; }
+      if (!form.bankIfscCode.trim()) { toast.error('Enter IFSC code'); return; }
+    } else {
+      if (!form.upiId.trim()) { toast.error('Enter UPI ID'); return; }
+    }
+    setLoading(true);
+    try {
+      await ridersAPI.updateBankAccount(uid, {
+        bankAccountHolderName: mode === 'bank' ? form.bankAccountHolderName.trim() : undefined,
+        bankAccountNumber: mode === 'bank' ? form.bankAccountNumber.trim() : undefined,
+        bankIfscCode: mode === 'bank' ? form.bankIfscCode.trim().toUpperCase() : undefined,
+        bankName: mode === 'bank' ? form.bankName.trim() : undefined,
+        upiId: mode === 'upi' ? form.upiId.trim() : undefined,
+      });
+      toast.success('Payout account updated!');
+      onSave(); onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update');
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Payout Account</div>
+          <button className="modal-close" onClick={onClose}><X size={14} /></button>
+        </div>
+
+        {/* Mode toggle */}
+        <div style={{
+          display: 'flex', background: 'var(--bg-2)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)', padding: 3, marginBottom: 20,
+        }}>
+          {[{ key: 'bank', label: '🏦 Bank' }, { key: 'upi', label: '📱 UPI' }].map(({ key, label }) => (
+            <button key={key} onClick={() => setMode(key)} style={{
+              flex: 1, background: mode === key ? 'var(--bg-1)' : 'transparent',
+              border: `1px solid ${mode === key ? 'var(--border-bright)' : 'transparent'}`,
+              borderRadius: 6, padding: '8px 0',
+              color: mode === key ? 'var(--text-0)' : 'var(--text-2)',
+              fontSize: 13, fontWeight: mode === key ? 600 : 400, cursor: 'pointer',
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {mode === 'bank' ? (
+          <>
+            <div className="form-group">
+              <label className="form-label">Account Holder Name *</label>
+              <input className="form-input" placeholder="As on bank passbook"
+                value={form.bankAccountHolderName} onChange={e => upd('bankAccountHolderName', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Account Number *</label>
+              <input className="form-input" placeholder="e.g. 1234567890"
+                value={form.bankAccountNumber} onChange={e => upd('bankAccountNumber', e.target.value.replace(/\D/g, ''))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">IFSC Code *</label>
+              <input className="form-input" placeholder="e.g. SBIN0001234"
+                value={form.bankIfscCode} onChange={e => upd('bankIfscCode', e.target.value.toUpperCase())} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Bank Name</label>
+              <input className="form-input" placeholder="e.g. State Bank of India"
+                value={form.bankName} onChange={e => upd('bankName', e.target.value)} />
+            </div>
+          </>
+        ) : (
+          <div className="form-group">
+            <label className="form-label">UPI ID *</label>
+            <input className="form-input" placeholder="e.g. yourname@upi"
+              value={form.upiId} onChange={e => upd('upiId', e.target.value.trim())} />
+          </div>
+        )}
+
+        <div className="flex gap-8">
+          <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={loading}>
+            {loading ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function StepIndicator({ steps, current }) {
   return (
@@ -367,6 +472,69 @@ export default function ProfilePage() {
         </div>
       )}
 
+      {/* Payout Account */}
+      <div className="card mb-12">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Banknote size={16} style={{ color: 'var(--accent)' }} />
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700 }}>Payout Account</div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => setModal('bank')} style={{ padding: 8 }}>
+            <Edit2 size={14} />
+          </button>
+        </div>
+
+        {rd?.bankAccountNumber || rd?.upiId ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {rd?.upiId && (
+              <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
+                <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>UPI ID</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', fontFamily: 'var(--font-mono)' }}>{rd.upiId}</div>
+              </div>
+            )}
+            {rd?.bankAccountNumber && (
+              <>
+                {rd?.bankAccountHolderName && (
+                  <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>Account Holder</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>{rd.bankAccountHolderName}</div>
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>Account No.</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', fontFamily: 'var(--font-mono)' }}>
+                      ••••{rd.bankAccountNumber.slice(-4)}
+                    </div>
+                  </div>
+                  {rd?.bankIfscCode && (
+                    <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>IFSC</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', fontFamily: 'var(--font-mono)' }}>{rd.bankIfscCode}</div>
+                    </div>
+                  )}
+                </div>
+                {rd?.bankName && (
+                  <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>Bank</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>{rd.bankName}</div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '16px 0' }}>
+            <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12 }}>
+              No payout account added yet
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={() => setModal('bank')}>
+              <Banknote size={13} /> Add Payout Account
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Sign out */}
       <button className="btn btn-danger" style={{ width: '100%', marginTop: 4 }} onClick={logout}>
         Sign Out
@@ -376,6 +544,7 @@ export default function ProfilePage() {
       {modal === 'profile' && <ProfileEditModal uid={user.uid} riderData={rd} onClose={() => setModal(null)} onSave={fetchRider} />}
       {modal === 'vehicle' && <VehicleModal uid={user.uid} onClose={() => setModal(null)} onSave={fetchRider} />}
       {modal === 'kyc' && <KycModal uid={user.uid} onClose={() => setModal(null)} onSave={fetchRider} />}
+      {modal === 'bank' && <BankAccountModal uid={user.uid} riderData={rd} onClose={() => setModal(null)} onSave={fetchRider} />}
     </div>
   );
 }

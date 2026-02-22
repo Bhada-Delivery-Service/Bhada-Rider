@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   User, Car, FileText, Send, CheckCircle, RefreshCw,
-  LogOut, X, Camera, Eye, Loader,
+  LogOut, X, Camera, Eye, Loader, Banknote,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ridersAPI, filesAPI } from '../services/api';
@@ -340,15 +340,138 @@ function KycModal({ uid, riderData, onClose, onSave }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   Main Page
-──────────────────────────────────────────────────────────────────────────────*/
+function BankAccountModal({ uid, riderData, onClose, onSave }) {
+  const existing = {
+    bankAccountHolderName: riderData?.bankAccountHolderName || '',
+    bankAccountNumber: riderData?.bankAccountNumber || '',
+    bankIfscCode: riderData?.bankIfscCode || '',
+    bankName: riderData?.bankName || '',
+    upiId: riderData?.upiId || '',
+  };
+
+  const [form, setForm] = useState(existing);
+  const [saving, setSaving] = useState(false);
+  const [mode, setMode] = useState(
+    existing.upiId && !existing.bankAccountNumber ? 'upi' : 'bank'
+  );
+
+  const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    if (mode === 'bank') {
+      if (!form.bankAccountHolderName.trim()) { toast.error('Enter account holder name'); return; }
+      if (!form.bankAccountNumber.trim()) { toast.error('Enter bank account number'); return; }
+      if (!form.bankIfscCode.trim()) { toast.error('Enter IFSC code'); return; }
+    } else {
+      if (!form.upiId.trim()) { toast.error('Enter UPI ID'); return; }
+    }
+    setSaving(true);
+    try {
+      await ridersAPI.updateBankAccount(uid, {
+        bankAccountHolderName: mode === 'bank' ? form.bankAccountHolderName.trim() : undefined,
+        bankAccountNumber: mode === 'bank' ? form.bankAccountNumber.trim() : undefined,
+        bankIfscCode: mode === 'bank' ? form.bankIfscCode.trim().toUpperCase() : undefined,
+        bankName: mode === 'bank' ? form.bankName.trim() : undefined,
+        upiId: mode === 'upi' ? form.upiId.trim() : undefined,
+      });
+      toast.success('Bank account saved!');
+      onSave(); onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to save bank details');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Payout Account</div>
+          <button className="modal-close" onClick={onClose}><X size={14} /></button>
+        </div>
+
+        <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 16, lineHeight: 1.5 }}>
+          Add your bank or UPI details so admin can transfer your earnings directly.
+        </div>
+
+        {/* Mode toggle */}
+        <div style={{
+          display: 'flex', background: 'var(--bg-2)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)', padding: 3, marginBottom: 20,
+        }}>
+          {[
+            { key: 'bank', label: '🏦 Bank Transfer' },
+            { key: 'upi',  label: '📱 UPI' },
+          ].map(({ key, label }) => (
+            <button key={key} onClick={() => setMode(key)} style={{
+              flex: 1, background: mode === key ? 'var(--bg-1)' : 'transparent',
+              border: `1px solid ${mode === key ? 'var(--border-bright)' : 'transparent'}`,
+              borderRadius: 6, padding: '8px 0',
+              color: mode === key ? 'var(--text-0)' : 'var(--text-2)',
+              fontSize: 13, fontWeight: mode === key ? 600 : 400, cursor: 'pointer',
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {mode === 'bank' ? (
+          <>
+            <div className="form-group">
+              <label className="form-label">Account Holder Name *</label>
+              <input className="form-input" placeholder="As on bank passbook"
+                value={form.bankAccountHolderName}
+                onChange={e => upd('bankAccountHolderName', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Account Number *</label>
+              <input className="form-input" placeholder="e.g. 1234567890123"
+                value={form.bankAccountNumber}
+                onChange={e => upd('bankAccountNumber', e.target.value.replace(/\D/g, ''))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">IFSC Code *</label>
+              <input className="form-input" placeholder="e.g. SBIN0001234"
+                value={form.bankIfscCode}
+                onChange={e => upd('bankIfscCode', e.target.value.toUpperCase())} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Bank Name</label>
+              <input className="form-input" placeholder="e.g. State Bank of India"
+                value={form.bankName}
+                onChange={e => upd('bankName', e.target.value)} />
+            </div>
+          </>
+        ) : (
+          <div className="form-group">
+            <label className="form-label">UPI ID *</label>
+            <input className="form-input" placeholder="e.g. yourname@upi or 9876543210@okaxis"
+              value={form.upiId}
+              onChange={e => upd('upiId', e.target.value.trim())} />
+          </div>
+        )}
+
+        <div style={{
+          padding: '10px 12px', background: 'var(--green-dim)',
+          border: '1px solid rgba(54,211,153,0.2)',
+          borderRadius: 8, fontSize: 12, color: 'var(--text-1)', marginBottom: 18, lineHeight: 1.5,
+        }}>
+          🔒 Your account details are securely stored and only visible to Bhada admin for processing payouts.
+        </div>
+
+        <div className="flex gap-8">
+          <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save Account'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 export default function OnboardingGatePage() {
   const { user, logout, updateRider, refreshOnboardingStatus, onboardingStatus } = useAuth();
   const [riderData, setRiderData] = useState(null);
   const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [modal, setModal]         = useState(null); // 'profile' | 'vehicle' | 'kyc'
+  const [modal, setModal]         = useState(null); // 'profile' | 'vehicle' | 'kyc' | 'bank'
 
   /* ── Fetch rider from server ─────────────────────────────────────────────── */
   const fetchRider = useCallback(async (silent = false) => {
@@ -433,6 +556,7 @@ export default function OnboardingGatePage() {
   const rawKycStatus = rd?.kyc?.kycStatus || rd?.kycStatus || 'NOT_SUBMITTED';
   const kycStatus  = rawKycStatus === 'VERIFIED' ? 'APPROVED' : rawKycStatus;
   const obStatus   = onboardingStatus || rd?.onboardingStatus || 'NOT_SUBMITTED';
+  const hasBankAccount = !!(rd?.bankAccountNumber || rd?.upiId);
 
   /* ── Steps definition ────────────────────────────────────────────────────── */
   const steps = [
@@ -466,10 +590,20 @@ export default function OnboardingGatePage() {
       done: kycStatus === 'APPROVED',
       pending: kycStatus === 'PENDING',
       rejected: kycStatus === 'REJECTED',
-      // ✅ FIX: button is HIDDEN when status is APPROVED or PENDING
       canAct: hasVehicle && kycStatus !== 'APPROVED' && kycStatus !== 'PENDING',
       label: kycStatus === 'REJECTED' ? 'Resubmit KYC' : 'Submit KYC',
       action: () => setModal('kyc'),
+    },
+    {
+      id: 'bank', Icon: Banknote,
+      title: 'Payout Account',
+      desc: 'Bank account or UPI ID for receiving payments',
+      done: hasBankAccount,
+      pending: false,
+      rejected: false,
+      canAct: kycStatus === 'APPROVED',
+      label: hasBankAccount ? 'Edit Account' : 'Add Payout Account',
+      action: () => setModal('bank'),
     },
     {
       id: 'onboarding', Icon: Send,
@@ -478,7 +612,7 @@ export default function OnboardingGatePage() {
       done: obStatus === 'APPROVED',
       pending: obStatus === 'PENDING',
       rejected: obStatus === 'REJECTED',
-      canAct: kycStatus === 'APPROVED' && (obStatus === 'NOT_SUBMITTED' || obStatus === 'REJECTED'),
+      canAct: kycStatus === 'APPROVED' && hasBankAccount && (obStatus === 'NOT_SUBMITTED' || obStatus === 'REJECTED'),
       label: obStatus === 'REJECTED' ? 'Resubmit Application' : 'Submit Application',
       action: submitOnboarding,
     },
@@ -636,6 +770,17 @@ export default function OnboardingGatePage() {
                       <Eye size={9} /> View submitted doc
                     </a>
                   )}
+
+                  {/* Bank account saved info */}
+                  {step.id === 'bank' && state === 'done' && (
+                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
+                      {rd?.upiId
+                        ? `UPI: ${rd.upiId}`
+                        : rd?.bankAccountNumber
+                          ? `A/C: ••••${rd.bankAccountNumber.slice(-4)} · ${rd.bankIfscCode || ''}`
+                          : 'Account saved'}
+                    </div>
+                  )}
                 </div>
 
                 {/* ✅ Action button — never shown when done OR pending */}
@@ -669,6 +814,9 @@ export default function OnboardingGatePage() {
       )}
       {modal === 'kyc' && (
         <KycModal uid={user.uid} riderData={rd} onClose={() => setModal(null)} onSave={() => fetchRider(true)} />
+      )}
+      {modal === 'bank' && (
+        <BankAccountModal uid={user.uid} riderData={rd} onClose={() => setModal(null)} onSave={() => fetchRider(true)} />
       )}
 
       <style>{`@keyframes ksp{to{transform:rotate(360deg)}}`}</style>

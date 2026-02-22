@@ -8,8 +8,10 @@ import LoginPage from './pages/LoginPage';
 import OnboardingGatePage from './pages/OnboardingGatePage';
 import DashboardPage from './pages/DashboardPage';
 import OrdersPage from './pages/OrdersPage';
+import OrderDetailPage from './pages/OrderDetailPage';
 import ProfilePage from './pages/ProfilePage';
 import RoutesAreasPage from './pages/RoutesAreasPage';
+import IncomePage from './pages/IncomePage';
 
 const Spinner = () => (
   <div className="loading-center" style={{ minHeight: '100vh' }}>
@@ -45,16 +47,12 @@ function OnboardingRoute({ children }) {
   return children;
 }
 
-// Inner app — has access to both auth and notification context
 function AppWithNotifications() {
-  const { user, refreshOnboardingStatus } = useAuth();
-  const accessToken = localStorage.getItem('accessToken');
+  const { user, refreshOnboardingStatus, accessToken } = useAuth();
 
   return (
     <NotificationProvider
       accessToken={user ? accessToken : null}
-      // When backend pushes ONBOARDING_APPROVED socket event,
-      // re-fetch rider status so the gate unlocks instantly
       onOnboardingApproved={refreshOnboardingStatus}
     >
       <Routes>
@@ -67,9 +65,11 @@ function AppWithNotifications() {
         {/* Main app — approved riders only */}
         <Route path="/" element={<ApprovedRoute><Layout /></ApprovedRoute>}>
           <Route index element={<DashboardPage />} />
-          <Route path="orders"  element={<OrdersPage />} />
-          <Route path="routes"  element={<RoutesAreasPage />} />
-          <Route path="profile" element={<ProfilePage />} />
+          <Route path="orders"     element={<OrdersPage />} />
+          <Route path="orders/:id" element={<OrderDetailPage />} />
+          <Route path="income"     element={<IncomePage />} />
+          <Route path="routes"     element={<RoutesAreasPage />} />
+          <Route path="profile"    element={<ProfilePage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

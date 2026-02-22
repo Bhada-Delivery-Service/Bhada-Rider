@@ -67,11 +67,13 @@ export const ridersAPI = {
   deleteArea: (id, areaId) => api.delete(`/riders/${id}/areas/${areaId}`),
   getPerformance: (id) => api.get(`/riders/${id}/performance`),
   completeDelivery: (id) => api.put(`/riders/${id}/delivery/complete`),
+  updateBankAccount: (id, data) => api.put(`/riders/${id}/onboarding`, data),
 };
 
 // ─── Orders ────────────────────────────────────────────────────────────────
 export const ordersAPI = {
   getAvailable: () => api.get('/orders/available'),
+  getMyOrders: () => api.get('/orders/my-rider-orders'),
   getById: (id) => api.get(`/orders/${id}`),
   accept: (id) => api.put(`/orders/${id}/accept`),
   cancelDelivery: (id, reason) => api.put(`/orders/${id}/cancel-delivery`, { reason }),
@@ -96,6 +98,17 @@ export const notificationsAPI = {
   getCount:    ()           => api.get('/notifications/count'),
   markSeen:    (id)         => api.put(`/notifications/${id}/seen`),
   markAllSeen: ()           => api.put('/notifications/seen-all'),
+};
+
+// ─── Earnings & Withdrawals ────────────────────────────────────────────────
+export const earningsAPI = {
+  // Earning transactions list
+  getEarnings:  (riderId, limit = 50) => api.get(`/earnings/riders/${riderId}?limit=${limit}`),
+  // Summary: totalEarnings, thisMonthEarnings, lastMonthEarnings, pendingPayout, totalWithdrawn
+  getSummary:   (riderId)             => api.get(`/earnings/riders/${riderId}/summary`),
+  // Withdrawal CRUD
+  getWithdrawals:      (riderId)      => api.get(`/earnings/riders/${riderId}/withdrawals`),
+  initiateWithdrawal:  (riderId, data) => api.post(`/earnings/riders/${riderId}/withdrawals`, data),
 };
 
 export default api;

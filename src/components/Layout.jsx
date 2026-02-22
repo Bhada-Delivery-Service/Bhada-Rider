@@ -1,13 +1,14 @@
 import React from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
-import { LayoutDashboard, Package, MapPin, User, Bike, Bell } from 'lucide-react';
+import { LayoutDashboard, Package, MapPin, User, Bike, Bell, IndianRupee } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
 import NotificationDrawer from '../components/NotificationDrawer';
 
 const navItems = [
-  { to: '/',       icon: LayoutDashboard, label: 'Home',    exact: true },
+  { to: '/',       icon: LayoutDashboard, label: 'Home',   exact: true },
   { to: '/orders', icon: Package,         label: 'Orders' },
+  { to: '/income', icon: IndianRupee,     label: 'Income' },
   { to: '/routes', icon: MapPin,          label: 'Routes' },
   { to: '/profile',icon: User,            label: 'Profile' },
 ];

@@ -6,37 +6,41 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [rider, setRider] = useState(null);
-  const [onboardingStatus, setOnboardingStatus] = useState(null); // null = loading
+  const [onboardingStatus, setOnboardingStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  // accessToken as React state — critical so NotificationProvider gets a stable
+  // reference that only changes on actual login/logout, not on every render.
+  // Reading directly from localStorage in App.jsx caused a new string reference
+  // on every render → NotificationContext useEffect([accessToken]) re-ran →
+  // disconnectSocket() called in a loop → socket connect/disconnect spam.
+  const [accessToken, setAccessToken] = useState(() => localStorage.getItem('accessToken'));
 
   // Fetch fresh rider data and onboarding status from server
   const fetchRiderStatus = async (uid) => {
-  try {
-    const { data } = await ridersAPI.getById(uid);
-    const rd = data?.data || data;
-    if (rd) {
-      localStorage.setItem('rider', JSON.stringify(rd));
-      setRider(rd);
-      setOnboardingStatus(rd.onboardingStatus || 'NOT_SUBMITTED');
-    }
-  } catch (err) {
-    // 404 = new rider, profile not created yet → treat as fresh start
-    if (err.response?.status === 404) {
-      setRider(null);
-      setOnboardingStatus('NOT_SUBMITTED');
-    } else {
-      // Other errors → fall back to cached value
-      const storedRider = localStorage.getItem('rider');
-      if (storedRider) {
-        const rd = JSON.parse(storedRider);
+    try {
+      const { data } = await ridersAPI.getById(uid);
+      const rd = data?.data || data;
+      if (rd) {
+        localStorage.setItem('rider', JSON.stringify(rd));
         setRider(rd);
         setOnboardingStatus(rd.onboardingStatus || 'NOT_SUBMITTED');
-      } else {
+      }
+    } catch (err) {
+      if (err.response?.status === 404) {
+        setRider(null);
         setOnboardingStatus('NOT_SUBMITTED');
+      } else {
+        const storedRider = localStorage.getItem('rider');
+        if (storedRider) {
+          const rd = JSON.parse(storedRider);
+          setRider(rd);
+          setOnboardingStatus(rd.onboardingStatus || 'NOT_SUBMITTED');
+        } else {
+          setOnboardingStatus('NOT_SUBMITTED');
+        }
       }
     }
-  }
-};
+  };
 
   useEffect(() => {
     const token = localStorage.getItem('accessToken');
@@ -46,13 +50,11 @@ export function AuthProvider({ children }) {
     if (token && storedUser) {
       const parsedUser = JSON.parse(storedUser);
       setUser(parsedUser);
-      // Set cached rider immediately so UI doesn't flash
       if (storedRider) {
         const rd = JSON.parse(storedRider);
         setRider(rd);
         setOnboardingStatus(rd.onboardingStatus || 'NOT_SUBMITTED');
       }
-      // Verify session then refresh rider status from server
       authAPI.checkSession()
         .then(({ data }) => {
           if (!data.valid) {
@@ -68,12 +70,12 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const login = async (accessToken, refreshToken, userData) => {
-    localStorage.setItem('accessToken', accessToken);
+  const login = async (newAccessToken, refreshToken, userData) => {
+    localStorage.setItem('accessToken', newAccessToken);
     localStorage.setItem('refreshToken', refreshToken);
     localStorage.setItem('user', JSON.stringify(userData));
+    setAccessToken(newAccessToken);  // ← update React state
     setUser(userData);
-    // Always fetch fresh onboarding status right after login
     await fetchRiderStatus(userData.uid);
   };
 
@@ -92,6 +94,7 @@ export function AuthProvider({ children }) {
     setUser(null);
     setRider(null);
     setOnboardingStatus(null);
+    setAccessToken(null);  // ← clear React state
   };
 
   const isApproved = onboardingStatus === 'APPROVED';
@@ -101,6 +104,7 @@ export function AuthProvider({ children }) {
       user, rider, login, logout, loading,
       updateRider, onboardingStatus, isApproved,
       refreshOnboardingStatus,
+      accessToken,  // ← expose stable token
     }}>
       {children}
     </AuthContext.Provider>
