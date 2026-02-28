@@ -56,20 +56,22 @@ function RouteMapModal({ onClose, onSave, loading }) {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markersRef = useRef([]);
-  const directionsRendererRef = useRef(null); // FIX: use DirectionsRenderer for real road route
-  const circlesRef = useRef([]);             // FIX: store threshold circles
+  const directionsRendererRef = useRef(null);
+  const circlesRef = useRef([]);
   const [mapsReady, setMapsReady] = useState(mapsLoaded);
   const [step, setStep] = useState('start'); // 'start' | 'end' | 'confirm'
   const [startPoint, setStartPoint] = useState(null);
   const [endPoint, setEndPoint] = useState(null);
   const [routeName, setRouteName] = useState('');
-  const [threshold1, setThreshold1] = useState(500);   // circle around start
-  const [threshold2, setThreshold2] = useState(500);   // circle around end
-  const [threshold3, setThreshold3] = useState(300);   // circle around waypoints
-  const [routeDistance, setRouteDistance] = useState(null); // real road distance
+  const [threshold1, setThreshold1] = useState(500);
+  const [threshold2, setThreshold2] = useState(500);
+  const [threshold3, setThreshold3] = useState(300);
+  const [routeDistance, setRouteDistance] = useState(null);
   const [routeDuration, setRouteDuration] = useState(null);
   const [fetchingRoute, setFetchingRoute] = useState(false);
   const [locating, setLocating] = useState(false);
+  // FIX: store the encoded polyline returned by Directions API
+  const [encodedPolyline, setEncodedPolyline] = useState('');
   const geocoder = useRef(null);
   const directionsService = useRef(null);
 
@@ -90,9 +92,8 @@ function RouteMapModal({ onClose, onSave, loading }) {
     geocoder.current = new window.google.maps.Geocoder();
     directionsService.current = new window.google.maps.DirectionsService();
 
-    // FIX: Use DirectionsRenderer to draw real road polyline
     directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
-      suppressMarkers: true, // we place our own custom markers
+      suppressMarkers: true,
       polylineOptions: {
         strokeColor: '#00e5a0',
         strokeOpacity: 0.9,
@@ -123,11 +124,13 @@ function RouteMapModal({ onClose, onSave, loading }) {
     getCurrentLocation(map);
   }, [mapsReady]);
 
-  /* ─── FIX: Fetch real road route when both points are set ─────────────── */
+  /* ─── FIX: Fetch real road route + capture encoded polyline ──────────── */
   useEffect(() => {
     if (!mapInstance.current || !startPoint || !endPoint || !directionsService.current) return;
 
     setFetchingRoute(true);
+    setEncodedPolyline(''); // reset on new route fetch
+
     directionsService.current.route(
       {
         origin: { lat: startPoint.lat, lng: startPoint.lng },
@@ -141,12 +144,27 @@ function RouteMapModal({ onClose, onSave, loading }) {
           const leg = result.routes[0]?.legs[0];
           setRouteDistance(leg?.distance?.text || null);
           setRouteDuration(leg?.duration?.text || null);
-          // Fit bounds to route
+
+          // FIX: Extract the Google Encoded Polyline from the Directions result
+          // overview_polyline is the encoded string the backend expects
+          const overviewPolyline = result.routes[0]?.overview_polyline;
+          setEncodedPolyline(overviewPolyline || '');
+
           const bounds = result.routes[0].bounds;
           mapInstance.current.fitBounds(bounds, 60);
         } else {
-          // Fallback: draw a straight dashed line if Directions API fails
           toast.error('Could not fetch road route — showing straight line');
+          // Fallback: generate a simple encoded polyline for the two points
+          // so the backend still receives a valid encoding field
+          if (window.google.maps.geometry?.encoding) {
+            const fallbackPath = [
+              new window.google.maps.LatLng(startPoint.lat, startPoint.lng),
+              new window.google.maps.LatLng(endPoint.lat, endPoint.lng),
+            ];
+            const fallbackEncoded = window.google.maps.geometry.encoding.encodePath(fallbackPath);
+            setEncodedPolyline(fallbackEncoded);
+          }
+
           const poly = new window.google.maps.Polyline({
             path: [startPoint, endPoint],
             strokeColor: '#ffcc00',
@@ -155,22 +173,19 @@ function RouteMapModal({ onClose, onSave, loading }) {
             icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '10px' }],
             map: mapInstance.current,
           });
-          // store to clean up later
           circlesRef.current.push({ setMap: (m) => poly.setMap(m) });
         }
       }
     );
   }, [startPoint, endPoint]);
 
-  /* ─── FIX: Draw / update threshold circles whenever thresholds change ─── */
+  /* ─── Draw / update threshold circles ───────────────────────────────── */
   useEffect(() => {
     if (!mapInstance.current) return;
 
-    // Clear old circles
     circlesRef.current.forEach(c => c.setMap(null));
     circlesRef.current = [];
 
-    // T1: circle around START point (green)
     if (startPoint) {
       const c1 = new window.google.maps.Circle({
         center: { lat: startPoint.lat, lng: startPoint.lng },
@@ -185,7 +200,6 @@ function RouteMapModal({ onClose, onSave, loading }) {
       circlesRef.current.push(c1);
     }
 
-    // T2: circle around END point (red)
     if (endPoint) {
       const c2 = new window.google.maps.Circle({
         center: { lat: endPoint.lat, lng: endPoint.lng },
@@ -274,14 +288,20 @@ function RouteMapModal({ onClose, onSave, loading }) {
     setEndPoint(null);
     setRouteDistance(null);
     setRouteDuration(null);
+    setEncodedPolyline(''); // FIX: reset encoding on reset
     setStep('start');
   };
 
   const handleSave = () => {
     if (!startPoint || !endPoint) { toast.error('Set both start and end points'); return; }
     if (!routeName.trim()) { toast.error('Enter a route name'); return; }
+    // FIX: guard — encoding must be present before saving
+    if (!encodedPolyline) { toast.error('Route encoding not ready yet, please wait'); return; }
+
+    // FIX: include `encoding` in the payload sent to the backend
     onSave({
       routeName: routeName.trim(),
+      encoding: encodedPolyline,
       node1: { latitude: startPoint.lat, longitude: startPoint.lng, label: startPoint.label },
       node2: { latitude: endPoint.lat, longitude: endPoint.lng, label: endPoint.label },
       threshold1: Number(threshold1),
@@ -472,7 +492,7 @@ function RouteMapModal({ onClose, onSave, loading }) {
           <button
             className="btn btn-primary flex-1"
             onClick={handleSave}
-            disabled={loading || !startPoint || !endPoint || !routeName.trim() || fetchingRoute}
+            disabled={loading || !startPoint || !endPoint || !routeName.trim() || fetchingRoute || !encodedPolyline}
           >
             {loading ? 'Saving…' : fetchingRoute ? 'Routing…' : <><CheckCircle size={13} /> Save Route</>}
           </button>

@@ -3,7 +3,7 @@ import {
   IndianRupee, ArrowDownToLine, Clock,
   CheckCircle2, XCircle, RefreshCw, ChevronDown, ChevronUp,
   Banknote, Smartphone, Wallet,
-  AlertCircle, X, ArrowRight, Receipt,
+  AlertCircle, X, ArrowRight, Receipt, TrendingUp,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { earningsAPI, ridersAPI } from '../services/api';
@@ -34,7 +34,7 @@ const fmtTime = (d) =>
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, color }) {
+function StatCard({ label, value, color, sub }) {
   return (
     <div style={{
       background: 'var(--bg-2)', border: '1px solid var(--border)',
@@ -46,6 +46,7 @@ function StatCard({ label, value, color }) {
       <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 800, color: color || 'var(--text-0)', lineHeight: 1.1 }}>
         ₹{fmt(value)}
       </div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
@@ -53,25 +54,35 @@ function StatCard({ label, value, color }) {
 // ─── Withdraw Modal ───────────────────────────────────────────────────────────
 
 function WithdrawModal({ pendingPayout, riderId, riderData, onClose, onSuccess }) {
-  // Pre-fill from saved bank account
-  const savedUpi = riderData?.upiId;
+  const savedUpi  = riderData?.upiId;
   const savedBank = riderData?.bankAccountNumber;
-  const defaultMethod = savedUpi ? 'UPI' : savedBank ? 'BANK' : 'PAYTM';
+  const defaultMethod  = savedUpi ? 'UPI' : savedBank ? 'BANK' : 'PAYTM';
   const defaultDetails = savedUpi
     ? savedUpi
     : savedBank
-      ? `A/C: ${savedBank}\nIFSC: ${riderData?.bankIfscCode || ''}\nBank: ${riderData?.bankName || ''}`.trim()
+      ? [`A/C: ${savedBank}`, riderData?.bankIfscCode ? `IFSC: ${riderData.bankIfscCode}` : '', riderData?.bankName ? `Bank: ${riderData.bankName}` : ''].filter(Boolean).join('\n')
       : '';
 
-  const [method, setMethod]   = useState(defaultMethod);
-  const [amount, setAmount]   = useState('');
+  const [method,  setMethod]  = useState(defaultMethod);
+  const [amount,  setAmount]  = useState('');
   const [details, setDetails] = useState(defaultDetails);
-  const [step, setStep]       = useState(1);
+  const [step,    setStep]    = useState(1);
   const [loading, setLoading] = useState(false);
 
   const selected = PAYMENT_METHODS.find(m => m.value === method);
   const amtNum   = parseFloat(amount) || 0;
   const amtValid = amtNum >= 1 && amtNum <= pendingPayout;
+
+  // Auto-update details when switching method if saved account matches
+  const handleMethodChange = (val) => {
+    setMethod(val);
+    if (val === 'UPI' && savedUpi)   setDetails(savedUpi);
+    else if (val === 'BANK' && savedBank) {
+      setDetails([`A/C: ${savedBank}`, riderData?.bankIfscCode ? `IFSC: ${riderData.bankIfscCode}` : '', riderData?.bankName ? `Bank: ${riderData.bankName}` : ''].filter(Boolean).join('\n'));
+    } else {
+      setDetails('');
+    }
+  };
 
   const handleSubmit = async () => {
     setLoading(true);
@@ -80,6 +91,8 @@ function WithdrawModal({ pendingPayout, riderId, riderData, onClose, onSuccess }
         requestedAmount: amtNum,
         paymentMethod:   method,
         accountDetails:  details.trim(),
+        riderName:       riderData ? `${riderData.firstName || ''} ${riderData.lastName || ''}`.trim() : '',
+        riderPhone:      riderData?.phoneNumber || '',
       });
       toast.success('Withdrawal request submitted! Admin will process it shortly.');
       onSuccess();
@@ -137,7 +150,7 @@ function WithdrawModal({ pendingPayout, riderId, riderData, onClose, onSuccess }
                 return (
                   <button
                     key={value}
-                    onClick={() => setMethod(value)}
+                    onClick={() => handleMethodChange(value)}
                     style={{
                       background: active ? 'var(--accent-dim)' : 'var(--bg-2)',
                       border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
@@ -202,6 +215,13 @@ function WithdrawModal({ pendingPayout, riderId, riderData, onClose, onSuccess }
               />
             </div>
 
+            {/* Saved account reminder */}
+            {(savedUpi || savedBank) && (
+              <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 14, padding: '8px 12px', background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                💡 Pre-filled from your saved payout account. Edit if you want to use a different one.
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setStep(1)}>Back</button>
               <button
@@ -218,7 +238,6 @@ function WithdrawModal({ pendingPayout, riderId, riderData, onClose, onSuccess }
         {/* ── Step 3: confirm ── */}
         {step === 3 && (
           <>
-            {/* Summary box */}
             <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 18 }}>
               <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>
                 Request Summary
@@ -235,7 +254,6 @@ function WithdrawModal({ pendingPayout, riderId, riderData, onClose, onSuccess }
               ))}
             </div>
 
-            {/* Info note */}
             <div style={{ background: 'var(--blue-dim)', border: '1px solid rgba(77,159,255,0.2)', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: 'var(--text-1)', marginBottom: 18, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <AlertCircle size={13} style={{ color: 'var(--blue)', flexShrink: 0, marginTop: 1 }} />
               Your balance will be held until admin confirms the payment. Rejected requests are fully refunded.
@@ -278,7 +296,7 @@ function EarningRow({ earning }) {
             {fmtDate(earning.createdAt)} · {fmtTime(earning.createdAt)}
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-2)', marginTop: 2 }}>
-            ₹{fmt(earning.grossAmount)} − {earning.commissionPercentage}% commission
+            ₹{fmt(earning.grossAmount)} gross − {earning.commissionPercentage}% commission
           </div>
         </div>
       </div>
@@ -300,16 +318,15 @@ function WithdrawalRow({ wd }) {
 
   const detailRows = [
     ['Account', wd.accountDetails],
-    wd.paidAmount          ? ['Paid',    `₹${fmt(wd.paidAmount)}`]              : null,
-    wd.paidAt              ? ['Paid on', `${fmtDate(wd.paidAt)} ${fmtTime(wd.paidAt)}`] : null,
-    wd.transactionReference ? ['Ref #',  wd.transactionReference]               : null,
-    wd.paymentNotes        ? ['Notes',   wd.paymentNotes]                       : null,
-    wd.rejectionReason     ? ['Reason',  wd.rejectionReason]                    : null,
+    wd.paidAmount           ? ['Paid',    `₹${fmt(wd.paidAmount)}`]                            : null,
+    wd.paidAt               ? ['Paid on', `${fmtDate(wd.paidAt)} ${fmtTime(wd.paidAt)}`]       : null,
+    wd.transactionReference ? ['Ref #',   wd.transactionReference]                             : null,
+    wd.paymentNotes         ? ['Notes',   wd.paymentNotes]                                     : null,
+    wd.rejectionReason      ? ['Reason',  wd.rejectionReason]                                  : null,
   ].filter(Boolean);
 
   return (
     <div style={{ borderBottom: '1px solid var(--border)' }}>
-      {/* Row header — tap to expand */}
       <button
         onClick={() => setExpanded(e => !e)}
         style={{
@@ -318,7 +335,6 @@ function WithdrawalRow({ wd }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
         }}
       >
-        {/* Left */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
             width: 36, height: 36, background: cfg.bg,
@@ -336,7 +352,7 @@ function WithdrawalRow({ wd }) {
             </div>
           </div>
         </div>
-        {/* Right */}
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 800, color: cfg.color }}>
@@ -353,14 +369,10 @@ function WithdrawalRow({ wd }) {
               </span>
             </div>
           </div>
-          {expanded
-            ? <ChevronUp  size={14} style={{ color: 'var(--text-2)' }} />
-            : <ChevronDown size={14} style={{ color: 'var(--text-2)' }} />
-          }
+          {expanded ? <ChevronUp size={14} style={{ color: 'var(--text-2)' }} /> : <ChevronDown size={14} style={{ color: 'var(--text-2)' }} />}
         </div>
       </button>
 
-      {/* Expanded detail panel */}
       {expanded && (
         <div style={{
           background: 'var(--bg-2)', borderRadius: 8,
@@ -410,7 +422,7 @@ export default function IncomePage() {
   const [riderData, setRiderData]     = useState(null);
   const [loading, setLoading]         = useState(true);
   const [showModal, setShowModal]     = useState(false);
-  const [tab, setTab]                 = useState('earnings'); // 'earnings' | 'withdrawals'
+  const [tab, setTab]                 = useState('earnings');
 
   const load = useCallback(async () => {
     if (!user?.uid) return;
@@ -422,9 +434,9 @@ export default function IncomePage() {
         earningsAPI.getWithdrawals(user.uid),
         ridersAPI.getById(user.uid),
       ]);
-      if (sumRes.status === 'fulfilled')   setSummary(sumRes.value.data?.data ?? null);
-      if (earnRes.status === 'fulfilled')  setEarnings(earnRes.value.data?.data ?? []);
-      if (wdRes.status === 'fulfilled')    setWithdrawals(wdRes.value.data?.data ?? []);
+      if (sumRes.status   === 'fulfilled') setSummary(sumRes.value.data?.data ?? null);
+      if (earnRes.status  === 'fulfilled') setEarnings(earnRes.value.data?.data ?? []);
+      if (wdRes.status    === 'fulfilled') setWithdrawals(wdRes.value.data?.data ?? []);
       if (riderRes.status === 'fulfilled') setRiderData(riderRes.value.data?.data || riderRes.value.data);
     } catch {
       toast.error('Failed to load earnings');
@@ -440,6 +452,7 @@ export default function IncomePage() {
   const totalWithdrawn = summary?.totalWithdrawn     ?? 0;
   const thisMonth      = summary?.thisMonthEarnings  ?? 0;
   const lastMonth      = summary?.lastMonthEarnings  ?? 0;
+  const totalDeliveries = summary?.totalDeliveries   ?? 0;
   const hasPendingWd   = withdrawals.some(w => w.status === 'PENDING');
 
   if (loading) {
@@ -456,7 +469,7 @@ export default function IncomePage() {
             My Earnings
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>
-            Track your income and payouts
+            {totalDeliveries} deliveries completed
           </div>
         </div>
         <button className="btn btn-ghost btn-sm" onClick={load} style={{ padding: 8 }} aria-label="Refresh">
@@ -518,8 +531,10 @@ export default function IncomePage() {
           </div>
         </div>
       )}
+
+      {/* ── Stats grid ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
-        <StatCard label="Total Earned"    value={totalEarnings}  color="var(--text-0)"  />
+        <StatCard label="Total Earned"    value={totalEarnings}  color="var(--text-0)"  sub={`${totalDeliveries} deliveries`} />
         <StatCard label="Total Withdrawn" value={totalWithdrawn} color="var(--text-1)"  />
         <StatCard label="This Month"      value={thisMonth}      color="var(--blue)"    />
         <StatCard label="Last Month"      value={lastMonth}      color="var(--text-2)"  />
@@ -556,9 +571,7 @@ export default function IncomePage() {
                 color: tab === t.key ? 'var(--accent)' : 'var(--text-2)',
                 borderRadius: 99, fontSize: 10, fontFamily: 'var(--font-mono)',
                 fontWeight: 700, padding: '1px 6px',
-              }}>
-                {t.count}
-              </span>
+              }}>{t.count}</span>
             )}
           </button>
         ))}

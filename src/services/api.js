@@ -39,46 +39,47 @@ api.interceptors.response.use(
 // ─── Auth ──────────────────────────────────────────────────────────────────
 export const authAPI = {
   verifyFirebase: (idToken) => api.post('/auth/verify-firebase', { idToken, role: 'rider' }),
-  refreshToken: (refreshToken) => api.post('/auth/refresh-token', { refreshToken }),
-  checkSession: () => api.get('/auth/check-session'),
+  refreshToken:   (refreshToken) => api.post('/auth/refresh-token', { refreshToken }),
+  checkSession:   () => api.get('/auth/check-session'),
 };
 
 // ─── Riders ────────────────────────────────────────────────────────────────
 export const ridersAPI = {
-  getById: (id) => api.get(`/riders/${id}`),
-  updateProfile: (id, data) => api.put(`/riders/${id}/profile`, data),
-  submitVehicle: (id, data) => api.post(`/riders/${id}/vehicle`, data),
-  submitKyc: (id, data) => api.post(`/riders/${id}/kyc`, data),
-  submitOnboarding: (id) => api.post(`/riders/${id}/onboarding`),
-  revokeOnboarding: (id) => api.delete(`/riders/${id}/onboarding`),
-  updateOnboarding: (id, data) => api.put(`/riders/${id}/onboarding`, data),
-  getOnboardingStatus: (id) => api.get(`/riders/${id}/onboarding/status`),
-  goOnline: (id) => api.put(`/riders/${id}/online`),
-  goOffline: (id) => api.put(`/riders/${id}/offline`),
-  takeBreak: (id) => api.put(`/riders/${id}/break`),
-  resume: (id) => api.put(`/riders/${id}/resume`),
-  getRoutes: (id) => api.get(`/riders/${id}/routes`),
-  addRoute: (id, data) => api.post(`/riders/${id}/routes`, data),
-  updateRoute: (id, routeId, data) => api.put(`/riders/${id}/routes/${routeId}`, data),
-  deleteRoute: (id, routeId) => api.delete(`/riders/${id}/routes/${routeId}`),
-  getAreas: (id) => api.get(`/riders/${id}/areas`),
-  addArea: (id, data) => api.post(`/riders/${id}/areas`, data),
-  updateArea: (id, areaId, data) => api.put(`/riders/${id}/areas/${areaId}`, data),
-  deleteArea: (id, areaId) => api.delete(`/riders/${id}/areas/${areaId}`),
-  getPerformance: (id) => api.get(`/riders/${id}/performance`),
-  completeDelivery: (id) => api.put(`/riders/${id}/delivery/complete`),
-  updateBankAccount: (id, data) => api.put(`/riders/${id}/onboarding`, data),
+  getById:           (id)          => api.get(`/riders/${id}`),
+  updateProfile:     (id, data)    => api.put(`/riders/${id}/profile`, data),
+  submitVehicle:     (id, data)    => api.post(`/riders/${id}/vehicle`, data),
+  submitKyc:         (id, data)    => api.post(`/riders/${id}/kyc`, data),
+  submitOnboarding:  (id)          => api.post(`/riders/${id}/onboarding`),
+  revokeOnboarding:  (id)          => api.delete(`/riders/${id}/onboarding`),
+  updateOnboarding:  (id, data)    => api.put(`/riders/${id}/onboarding`, data),
+  getOnboardingStatus:(id)         => api.get(`/riders/${id}/onboarding/status`),
+  goOnline:          (id)          => api.put(`/riders/${id}/online`),
+  goOffline:         (id)          => api.put(`/riders/${id}/offline`),
+  takeBreak:         (id)          => api.put(`/riders/${id}/break`),
+  resume:            (id)          => api.put(`/riders/${id}/resume`),
+  getRoutes:         (id)          => api.get(`/riders/${id}/routes`),
+  addRoute:          (id, data)    => api.post(`/riders/${id}/routes`, data),
+  updateRoute:       (id, rid, data) => api.put(`/riders/${id}/routes/${rid}`, data),
+  deleteRoute:       (id, rid)     => api.delete(`/riders/${id}/routes/${rid}`),
+  getAreas:          (id)          => api.get(`/riders/${id}/areas`),
+  addArea:           (id, data)    => api.post(`/riders/${id}/areas`, data),
+  updateArea:        (id, aid, data) => api.put(`/riders/${id}/areas/${aid}`, data),
+  deleteArea:        (id, aid)     => api.delete(`/riders/${id}/areas/${aid}`),
+  getPerformance:    (id)          => api.get(`/riders/${id}/performance`),
+  completeDelivery:  (id)          => api.put(`/riders/${id}/delivery/complete`),
+  // Save bank account / UPI details via onboarding update
+  updateBankAccount: (id, data)    => api.put(`/riders/${id}/onboarding`, data),
 };
 
 // ─── Orders ────────────────────────────────────────────────────────────────
 export const ordersAPI = {
-  getAvailable: () => api.get('/orders/available'),
-  getMyOrders: () => api.get('/orders/my-rider-orders'),
-  getById: (id) => api.get(`/orders/${id}`),
-  accept: (id) => api.put(`/orders/${id}/accept`),
-  cancelDelivery: (id, reason) => api.put(`/orders/${id}/cancel-delivery`, { reason }),
-  handover: (id, pickupOtp) => api.post(`/orders/${id}/handover`, { pickupOtp }),
-  deliver: (id, dropOtp) => api.post(`/orders/${id}/deliver`, { dropOtp }),
+  getAvailable:   ()               => api.get('/orders/available'),
+  getMyOrders:    ()               => api.get('/orders/my-rider-orders'),
+  getById:        (id)             => api.get(`/orders/${id}`),
+  accept:         (id)             => api.put(`/orders/${id}/accept`),
+  cancelDelivery: (id, reason)     => api.put(`/orders/${id}/cancel-delivery`, { reason }),
+  handover:       (id, pickupOtp)  => api.post(`/orders/${id}/handover`, { pickupOtp }),
+  deliver:        (id, dropOtp)    => api.post(`/orders/${id}/deliver`, { dropOtp }),
 };
 
 // ─── File Upload ───────────────────────────────────────────────────────────
@@ -101,14 +102,36 @@ export const notificationsAPI = {
 };
 
 // ─── Earnings & Withdrawals ────────────────────────────────────────────────
+// Routes:
+//   GET  /earnings/riders/:riderId               → earning transaction list
+//   GET  /earnings/riders/:riderId/summary       → totals + pendingPayout
+//   GET  /earnings/riders/:riderId/withdrawals   → rider's withdrawal history
+//   POST /earnings/riders/:riderId/withdrawals   → submit withdrawal request
 export const earningsAPI = {
-  // Earning transactions list
-  getEarnings:  (riderId, limit = 50) => api.get(`/earnings/riders/${riderId}?limit=${limit}`),
-  // Summary: totalEarnings, thisMonthEarnings, lastMonthEarnings, pendingPayout, totalWithdrawn
-  getSummary:   (riderId)             => api.get(`/earnings/riders/${riderId}/summary`),
-  // Withdrawal CRUD
-  getWithdrawals:      (riderId)      => api.get(`/earnings/riders/${riderId}/withdrawals`),
-  initiateWithdrawal:  (riderId, data) => api.post(`/earnings/riders/${riderId}/withdrawals`, data),
+  // Earning transactions list (latest first)
+  getEarnings: (riderId, limit = 50) =>
+    api.get(`/earnings/riders/${riderId}?limit=${limit}`),
+
+  // Summary: totalEarnings, thisMonthEarnings, lastMonthEarnings,
+  //          totalDeliveries, pendingPayout, totalWithdrawn
+  getSummary: (riderId) =>
+    api.get(`/earnings/riders/${riderId}/summary`),
+
+  // Rider's withdrawal history (latest first)
+  getWithdrawals: (riderId) =>
+    api.get(`/earnings/riders/${riderId}/withdrawals`),
+
+  // Submit a withdrawal request
+  // body: { requestedAmount, paymentMethod, accountDetails, riderName?, riderPhone? }
+  initiateWithdrawal: (riderId, data) =>
+    api.post(`/earnings/riders/${riderId}/withdrawals`, data),
+};
+
+// ─── Security Deposit ──────────────────────────────────────────────────────
+export const securityDepositAPI = {
+  getMy:    ()     => api.get('/security-deposit/my'),
+  initiate: ()     => api.post('/security-deposit/initiate'),
+  verify:   (data) => api.post('/security-deposit/verify', data),
 };
 
 export default api;

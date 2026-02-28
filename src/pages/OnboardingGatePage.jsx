@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   User, Car, FileText, Send, CheckCircle, RefreshCw,
-  LogOut, X, Camera, Eye, Loader, Banknote,
+  LogOut, X, Camera, Eye, Loader, Banknote, ShieldCheck,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { ridersAPI, filesAPI } from '../services/api';
+import { ridersAPI, filesAPI, securityDepositAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { getSocket } from '../services/socketService';
 
@@ -466,12 +466,169 @@ function BankAccountModal({ uid, riderData, onClose, onSave }) {
     </div>
   );
 }
+/* ─────────────────────────────────────────────────────────────────────────────
+   SecurityDepositModal — initiate and verify Razorpay payment for deposit
+──────────────────────────────────────────────────────────────────────────────*/
+/* Dynamically injects the Razorpay checkout script and resolves when ready */
+function loadRazorpaySDK() {
+  return new Promise((resolve, reject) => {
+    if (window.Razorpay) { resolve(); return; }
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload  = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Razorpay SDK'));
+    document.body.appendChild(script);
+  });
+}
+
+function SecurityDepositModal({ onClose, onPaid }) {
+  const [depositInfo, setDepositInfo] = useState(null);
+  const [loading, setLoading]         = useState(true);
+  const [paying, setPaying]           = useState(false);
+  const [verifying, setVerifying]     = useState(false);
+
+  // Load current deposit status / required amount on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await securityDepositAPI.getMy();
+        const d = data?.data;
+        if (d?.status === 'PAID') { onPaid(); onClose(); return; }
+        setDepositInfo({ requiredAmount: data?.requiredAmount || d?.amount || 0, deposit: d });
+      } catch (err) {
+        toast.error('Failed to load deposit info');
+        onClose();
+      } finally { setLoading(false); }
+    })();
+  }, []); // eslint-disable-line
+
+  const handlePay = async () => {
+    setPaying(true);
+    try {
+      // Step 1: Initiate — get Razorpay order
+      const { data } = await securityDepositAPI.initiate();
+      const { gatewayOrderId, amount, alreadyPaid } = data.data;
+
+      if (alreadyPaid) { toast.success('Deposit already paid!'); onPaid(); onClose(); return; }
+
+      // Step 2: Dynamically load Razorpay SDK if not already present
+      try {
+        await loadRazorpaySDK();
+      } catch {
+        toast.error('Could not load payment SDK. Check your internet connection.');
+        setPaying(false);
+        return;
+      }
+
+      // Step 3: Open Razorpay checkout
+      const rzp = new window.Razorpay({
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID || '',
+        order_id: gatewayOrderId,
+        amount: amount * 100, // paise
+        currency: 'INR',
+        name: 'Bhada Security Deposit',
+        description: 'One-time refundable security deposit',
+        handler: async (response) => {
+          // Step 4: Verify payment
+          setVerifying(true);
+          try {
+            await securityDepositAPI.verify({
+              gatewayOrderId,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+            });
+            toast.success('Security deposit paid successfully! 🎉');
+            onPaid();
+            onClose();
+          } catch (err) {
+            toast.error(err.response?.data?.message || 'Verification failed. Contact support if amount was deducted.');
+          } finally { setVerifying(false); }
+        },
+        modal: { ondismiss: () => setPaying(false) },
+        theme: { color: '#00e5a0' },
+      });
+      rzp.open();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to initiate payment');
+      setPaying(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Security Deposit</div>
+          <button className="modal-close" onClick={onClose}><X size={14} /></button>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '32px 0' }}>
+            <Loader size={24} style={{ color: 'var(--accent)', animation: 'ksp 0.8s linear infinite' }} />
+          </div>
+        ) : verifying ? (
+          <div style={{ textAlign: 'center', padding: '32px 0' }}>
+            <Loader size={24} style={{ color: 'var(--accent)', animation: 'ksp 0.8s linear infinite' }} />
+            <div style={{ marginTop: 12, fontSize: 13, color: 'var(--text-2)' }}>Verifying payment…</div>
+          </div>
+        ) : (
+          <>
+            {/* Amount */}
+            <div style={{
+              textAlign: 'center', padding: '20px 0 24px',
+              borderBottom: '1px solid var(--border)', marginBottom: 20,
+            }}>
+              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
+                Deposit Amount
+              </div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 36, fontWeight: 800, color: 'var(--accent)', letterSpacing: '-0.02em' }}>
+                ₹{depositInfo?.requiredAmount ?? 0}
+              </div>
+            </div>
+
+            {/* Info */}
+            <div style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.7, marginBottom: 20 }}>
+              A one-time <strong>refundable security deposit</strong> is required before your onboarding can be approved. This amount will be returned to you when you leave the platform in good standing.
+            </div>
+
+            <div style={{
+              padding: '10px 12px', background: 'var(--blue-dim)',
+              borderRadius: 8, fontSize: 12, color: 'var(--blue)', marginBottom: 20, lineHeight: 1.5,
+            }}>
+              🔒 Payment is processed securely via Razorpay. Your money is safe.
+            </div>
+
+            <div className="flex gap-8">
+              <button className="btn btn-secondary flex-1" onClick={onClose} disabled={paying}>Cancel</button>
+              <button className="btn btn-primary flex-1" onClick={handlePay} disabled={paying}>
+                {paying ? <><Loader size={13} style={{ animation: 'ksp 0.8s linear infinite' }} /> Processing…</> : `Pay ₹${depositInfo?.requiredAmount ?? 0}`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 export default function OnboardingGatePage() {
   const { user, logout, updateRider, refreshOnboardingStatus, onboardingStatus } = useAuth();
   const [riderData, setRiderData] = useState(null);
   const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [modal, setModal]         = useState(null); // 'profile' | 'vehicle' | 'kyc' | 'bank'
+  const [modal, setModal]         = useState(null); // 'profile' | 'vehicle' | 'kyc' | 'bank' | 'security_deposit'
+  const [depositStatus, setDepositStatus] = useState(null); // null | 'PENDING_PAYMENT' | 'PAID'
+
+  /* ── Fetch deposit status ────────────────────────────────────────────────── */
+  const fetchDepositStatus = useCallback(async () => {
+    try {
+      const { data } = await securityDepositAPI.getMy();
+      if (data?.data?.status) setDepositStatus(data.data.status);
+      else if (data?.isRequired === false) setDepositStatus('PAID'); // feature disabled
+    } catch { /* ignore — deposit feature may not be enabled */ }
+  }, []);
 
   /* ── Fetch rider from server ─────────────────────────────────────────────── */
   const fetchRider = useCallback(async (silent = false) => {
@@ -488,7 +645,7 @@ export default function OnboardingGatePage() {
     } finally { setLoading(false); }
   }, [user?.uid]); // eslint-disable-line
 
-  useEffect(() => { fetchRider(); }, [fetchRider]);
+  useEffect(() => { fetchRider(); fetchDepositStatus(); }, [fetchRider, fetchDepositStatus]);
 
   /* ── Real-time socket: re-render immediately when admin acts ─────────────── */
   useEffect(() => {
@@ -523,7 +680,7 @@ export default function OnboardingGatePage() {
   /* ── Handlers ────────────────────────────────────────────────────────────── */
   const handleRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refreshOnboardingStatus(), fetchRider(true)]);
+    await Promise.all([refreshOnboardingStatus(), fetchRider(true), fetchDepositStatus()]);
     setRefreshing(false);
     toast.success('Status refreshed');
   };
@@ -557,6 +714,9 @@ export default function OnboardingGatePage() {
   const kycStatus  = rawKycStatus === 'VERIFIED' ? 'APPROVED' : rawKycStatus;
   const obStatus   = onboardingStatus || rd?.onboardingStatus || 'NOT_SUBMITTED';
   const hasBankAccount = !!(rd?.bankAccountNumber || rd?.upiId);
+
+  const depositPaid = depositStatus === 'PAID';
+  const depositPending = depositStatus === 'PENDING_PAYMENT';
 
   /* ── Steps definition ────────────────────────────────────────────────────── */
   const steps = [
@@ -606,13 +766,24 @@ export default function OnboardingGatePage() {
       action: () => setModal('bank'),
     },
     {
+      id: 'security_deposit', Icon: ShieldCheck,
+      title: 'Security Deposit',
+      desc: 'One-time refundable deposit required before approval',
+      done: depositPaid,
+      pending: false,
+      rejected: false,
+      canAct: hasBankAccount && kycStatus === 'APPROVED' && !depositPaid,
+      label: depositPending ? 'Pay Deposit' : 'Pay Security Deposit',
+      action: () => setModal('security_deposit'),
+    },
+    {
       id: 'onboarding', Icon: Send,
       title: 'Submit Application',
       desc: 'Send your application for admin review',
       done: obStatus === 'APPROVED',
       pending: obStatus === 'PENDING',
       rejected: obStatus === 'REJECTED',
-      canAct: kycStatus === 'APPROVED' && hasBankAccount && (obStatus === 'NOT_SUBMITTED' || obStatus === 'REJECTED'),
+      canAct: kycStatus === 'APPROVED' && hasBankAccount && depositPaid && (obStatus === 'NOT_SUBMITTED' || obStatus === 'REJECTED'),
       label: obStatus === 'REJECTED' ? 'Resubmit Application' : 'Submit Application',
       action: submitOnboarding,
     },
@@ -781,6 +952,13 @@ export default function OnboardingGatePage() {
                           : 'Account saved'}
                     </div>
                   )}
+
+                  {/* Security deposit paid */}
+                  {step.id === 'security_deposit' && state === 'done' && (
+                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--green)', fontFamily: 'var(--font-mono)' }}>
+                      ✓ Deposit paid & verified
+                    </div>
+                  )}
                 </div>
 
                 {/* ✅ Action button — never shown when done OR pending */}
@@ -817,6 +995,12 @@ export default function OnboardingGatePage() {
       )}
       {modal === 'bank' && (
         <BankAccountModal uid={user.uid} riderData={rd} onClose={() => setModal(null)} onSave={() => fetchRider(true)} />
+      )}
+      {modal === 'security_deposit' && (
+        <SecurityDepositModal
+          onClose={() => setModal(null)}
+          onPaid={() => { setDepositStatus('PAID'); fetchDepositStatus(); }}
+        />
       )}
 
       <style>{`@keyframes ksp{to{transform:rotate(360deg)}}`}</style>
