@@ -22,6 +22,7 @@ const NOTIF_EMOJI = {
   DISPUTE_RESOLVED:      '✅',
   PAYMENT_SUCCESS:       '💳',
   PAYMENT_REFUNDED:      '💸',
+  EARNING_CREDITED:      '💰',
 };
 
 export function NotificationProvider({ children, accessToken, onOnboardingApproved }) {

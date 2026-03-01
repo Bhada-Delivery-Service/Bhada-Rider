@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, RefreshCw, ChevronRight, MapPin, Camera } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ordersAPI } from '../services/api';
+import { getSocket } from '../services/socketService';
 
 const statusBadge = (status) => {
   const map = {
@@ -42,6 +43,23 @@ export default function OrdersPage() {
   };
 
   useEffect(() => { fetchOrders(); }, []);
+
+  // Listen for real-time new order notifications via socket.
+  // The backend only emits 'notification:new' with type ORDER_AVAILABLE to
+  // riders who are in the eligibleRiderIds list — so this event fires ONLY
+  // for eligible riders. We auto-refresh the available orders list when it fires.
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const handleNewNotification = (n) => {
+      if (n?.type === 'ORDER_AVAILABLE') {
+        fetchOrders(); // backend already filtered — safe to refresh
+        toast('📦 New order available!', { duration: 3000 });
+      }
+    };
+    socket.on('notification:new', handleNewNotification);
+    return () => socket.off('notification:new', handleNewNotification);
+  }, []);
 
   const currentTab = TABS.find(t => t.key === tab);
   // Available tab: PLACED orders from the broadcast list

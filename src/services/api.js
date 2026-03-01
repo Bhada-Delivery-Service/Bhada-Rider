@@ -108,6 +108,10 @@ export const notificationsAPI = {
 //   GET  /earnings/riders/:riderId/withdrawals   → rider's withdrawal history
 //   POST /earnings/riders/:riderId/withdrawals   → submit withdrawal request
 export const earningsAPI = {
+  // Current platform commission percentage from active pricing config
+  getCommission: () =>
+    api.get('/earnings/commission'),
+
   // Earning transactions list (latest first)
   getEarnings: (riderId, limit = 50) =>
     api.get(`/earnings/riders/${riderId}?limit=${limit}`),

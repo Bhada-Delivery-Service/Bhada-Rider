@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { earningsAPI, ridersAPI } from '../services/api';
+import { getSocket } from '../services/socketService';
 import { useAuth } from '../context/AuthContext';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -416,28 +417,31 @@ function WithdrawalRow({ wd }) {
 
 export default function IncomePage() {
   const { user }                      = useAuth();
-  const [summary, setSummary]         = useState(null);
-  const [earnings, setEarnings]       = useState([]);
-  const [withdrawals, setWithdrawals] = useState([]);
-  const [riderData, setRiderData]     = useState(null);
-  const [loading, setLoading]         = useState(true);
-  const [showModal, setShowModal]     = useState(false);
-  const [tab, setTab]                 = useState('earnings');
+  const [summary, setSummary]             = useState(null);
+  const [earnings, setEarnings]           = useState([]);
+  const [withdrawals, setWithdrawals]     = useState([]);
+  const [riderData, setRiderData]         = useState(null);
+  const [commissionRate, setCommissionRate] = useState(null); // from active pricing config
+  const [loading, setLoading]             = useState(true);
+  const [showModal, setShowModal]         = useState(false);
+  const [tab, setTab]                     = useState('earnings');
 
   const load = useCallback(async () => {
     if (!user?.uid) return;
     setLoading(true);
     try {
-      const [sumRes, earnRes, wdRes, riderRes] = await Promise.allSettled([
+      const [sumRes, earnRes, wdRes, riderRes, commRes] = await Promise.allSettled([
         earningsAPI.getSummary(user.uid),
         earningsAPI.getEarnings(user.uid, 50),
         earningsAPI.getWithdrawals(user.uid),
         ridersAPI.getById(user.uid),
+        earningsAPI.getCommission(),
       ]);
       if (sumRes.status   === 'fulfilled') setSummary(sumRes.value.data?.data ?? null);
       if (earnRes.status  === 'fulfilled') setEarnings(earnRes.value.data?.data ?? []);
       if (wdRes.status    === 'fulfilled') setWithdrawals(wdRes.value.data?.data ?? []);
       if (riderRes.status === 'fulfilled') setRiderData(riderRes.value.data?.data || riderRes.value.data);
+      if (commRes.status  === 'fulfilled') setCommissionRate(commRes.value.data?.data?.commissionPercent ?? null);
     } catch {
       toast.error('Failed to load earnings');
     } finally {
@@ -446,6 +450,20 @@ export default function IncomePage() {
   }, [user?.uid]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh earnings when a new earning is credited (socket notification).
+  // The backend emits EARNING_CREDITED only to the specific rider — safe to reload.
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const handleNotif = (n) => {
+      if (n?.type === 'EARNING_CREDITED') {
+        load(); // reload summary + transactions to reflect the new credit
+      }
+    };
+    socket.on('notification:new', handleNotif);
+    return () => socket.off('notification:new', handleNotif);
+  }, [load]);
 
   const pendingPayout  = summary?.pendingPayout      ?? 0;
   const totalEarnings  = summary?.totalEarnings      ?? 0;
@@ -533,11 +551,44 @@ export default function IncomePage() {
       )}
 
       {/* ── Stats grid ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
         <StatCard label="Total Earned"    value={totalEarnings}  color="var(--text-0)"  sub={`${totalDeliveries} deliveries`} />
         <StatCard label="Total Withdrawn" value={totalWithdrawn} color="var(--text-1)"  />
         <StatCard label="This Month"      value={thisMonth}      color="var(--blue)"    />
         <StatCard label="Last Month"      value={lastMonth}      color="var(--text-2)"  />
+      </div>
+
+      {/* ── Commission rate banner ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 14px', marginBottom: 20,
+        background: 'var(--bg-2)', border: '1px solid var(--border)',
+        borderRadius: 10,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{
+            width: 30, height: 30, borderRadius: 8,
+            background: 'rgba(255,154,60,0.12)',
+            display: 'grid', placeItems: 'center', flexShrink: 0,
+          }}>
+            <span style={{ fontSize: 14 }}>💸</span>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)' }}>Platform Commission</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 1 }}>
+              Deducted from each delivery before crediting your wallet
+            </div>
+          </div>
+        </div>
+        <div style={{
+          fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 800,
+          color: 'var(--orange)',
+          background: 'rgba(255,154,60,0.1)',
+          border: '1px solid rgba(255,154,60,0.25)',
+          borderRadius: 8, padding: '4px 12px',
+        }}>
+          {commissionRate !== null ? `${commissionRate}%` : '—'}
+        </div>
       </div>
 
       {/* ── Tab bar ── */}
