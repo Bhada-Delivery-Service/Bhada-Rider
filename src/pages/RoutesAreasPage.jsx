@@ -4,7 +4,7 @@ import {
   Circle, CheckCircle, Crosshair, ChevronRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { ridersAPI } from '../services/api';
+import { ridersAPI, serviceAreaAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 /* ─── Google Maps loader ─────────────────────────────────────────────────── */
@@ -753,6 +753,22 @@ export default function RoutesAreasPage() {
   const addRoute = async (form) => {
     setActionLoading(true);
     try {
+      // ── Service Area Pre-validation ───────────────────────────────────
+      // Validate before even sending to backend, for a fast friendly error.
+      try {
+        const { data: saData } = await serviceAreaAPI.validate(
+          form.node1.latitude, form.node1.longitude,
+          form.node2.latitude, form.node2.longitude,
+        );
+        if (!saData.data.bothServiced) {
+          toast.error(saData.data.failReason || 'Route start or end point is outside active service areas. Contact admin to expand coverage.', { duration: 6000 });
+          setActionLoading(false);
+          return;
+        }
+      } catch {
+        // If validation endpoint fails, let backend handle it
+      }
+      // ── Proceed with registration ─────────────────────────────────────
       await ridersAPI.addRoute(user.uid, form);
       toast.success('Route added!');
       setModal(null);

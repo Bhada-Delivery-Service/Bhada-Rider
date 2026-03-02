@@ -138,4 +138,11 @@ export const securityDepositAPI = {
   verify:   (data) => api.post('/security-deposit/verify', data),
 };
 
+// ─── Service Area ──────────────────────────────────────────────────────────
+export const serviceAreaAPI = {
+  getActive:  ()                        => api.get('/service-areas/active'),
+  validate:   (pLat, pLng, dLat, dLng) =>
+    api.get(`/service-areas/validate?pickupLat=${pLat}&pickupLng=${pLng}&dropLat=${dLat}&dropLng=${dLng}`),
+};
+
 export default api;
