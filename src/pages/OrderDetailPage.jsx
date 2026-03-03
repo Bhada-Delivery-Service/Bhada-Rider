@@ -189,6 +189,18 @@ export default function OrderDetailPage() {
 
   useEffect(() => { fetchOrder(); }, [id]);
 
+  // ── Real-time: update this order page when status changes elsewhere ───────
+  // e.g. sender marks package ready (PLACED → READY), admin cancels, deliver completes
+  useEffect(() => {
+    const handler = (e) => {
+      const updated = e.detail;
+      if (!updated?.orderId || updated.orderId !== id) return;
+      setOrder(prev => prev ? { ...prev, ...updated } : updated);
+    };
+    window.addEventListener('ws:order:updated', handler);
+    return () => window.removeEventListener('ws:order:updated', handler);
+  }, [id]);
+
   const handleAction = async (action, extra) => {
     setActionLoading(true);
     try {

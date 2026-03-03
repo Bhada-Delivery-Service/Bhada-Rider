@@ -29,6 +29,34 @@ export default function DashboardPage() {
   const trackingRef    = useRef(false);
   const retryTimerRef  = useRef(null); // BUG FIX 2: for socket-retry cleanup
 
+   const handleTrackingForStatus = useCallback((status) => {
+    const shouldTrack = status === 'ONLINE' || status === 'AVAILABLE' || status === 'BUSY';
+
+    if (shouldTrack && !trackingRef.current) {
+      const socket = getSocket();
+      if (socket) {
+        // locationService handles both connected and still-connecting sockets correctly.
+        startTracking(socket, () => setTracking(true));
+        trackingRef.current = true;
+        if (retryTimerRef.current) {
+          clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
+      } else {
+        // Socket not created yet (NotificationContext still mounting) — retry.
+        console.warn('[Dashboard] Socket not ready yet — retrying in 300ms');
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          handleTrackingForStatus(status);
+        }, 300);
+      }
+    } else if (!shouldTrack && trackingRef.current) {
+      stopTracking();
+      trackingRef.current = false;
+      setTracking(false);
+    }
+  }, []);
+  
   // ── Fetch rider + performance data ───────────────────────────────────────
   const fetchData = async () => {
     if (!user?.uid) return;
@@ -57,6 +85,31 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchData(); }, [user?.uid]);
 
+  // ── Real-time: update rider profile/status when admin acts (KYC, onboarding) ──
+  useEffect(() => {
+    const onRiderUpdated = (e) => {
+      const updated = e.detail;
+      const rid = updated?.riderUid || updated?.uid || updated?.id;
+      if (!rid || rid !== user?.uid) return;
+      const rd = updated.rider || updated;
+      setRiderData(prev => prev ? { ...prev, ...rd } : rd);
+      updateRider(rd);
+      const status = rd?.riderAvailabilityStatus || rd?.status;
+      if (status) handleTrackingForStatus(status);
+    };
+    window.addEventListener('ws:rider:updated', onRiderUpdated);
+    return () => window.removeEventListener('ws:rider:updated', onRiderUpdated);
+  }, [user?.uid, handleTrackingForStatus, updateRider]);
+
+  // ── BUG FIX 2: handleTrackingForStatus with socket-ready retry ───────────
+  // Previously, if getSocket() returned null (socket not yet created by NotificationContext)
+  // OR the socket existed but wasn't connected yet, the first GPS emit was silently dropped
+  // and tracking stayed in "ACQUIRING GPS…" forever.
+  //
+  // Fix: if socket is null → retry in 500ms.
+  // If socket exists but not connected → startTracking handles it internally via
+  // socket.once('connect') in locationService.js (see that file's fix).
+ 
   // Pre-warm GPS so the browser has a cached position before the rider taps "Go Online"
   useEffect(() => { warmupGPS(); }, []);
 
@@ -79,41 +132,7 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // ── BUG FIX 2: handleTrackingForStatus with socket-ready retry ───────────
-  // Previously, if getSocket() returned null (socket not yet created by NotificationContext)
-  // OR the socket existed but wasn't connected yet, the first GPS emit was silently dropped
-  // and tracking stayed in "ACQUIRING GPS…" forever.
-  //
-  // Fix: if socket is null → retry in 500ms.
-  // If socket exists but not connected → startTracking handles it internally via
-  // socket.once('connect') in locationService.js (see that file's fix).
-  const handleTrackingForStatus = useCallback((status) => {
-    const shouldTrack = status === 'ONLINE' || status === 'AVAILABLE' || status === 'BUSY';
-
-    if (shouldTrack && !trackingRef.current) {
-      const socket = getSocket();
-      if (socket) {
-        // locationService handles both connected and still-connecting sockets correctly.
-        startTracking(socket, () => setTracking(true));
-        trackingRef.current = true;
-        if (retryTimerRef.current) {
-          clearTimeout(retryTimerRef.current);
-          retryTimerRef.current = null;
-        }
-      } else {
-        // Socket not created yet (NotificationContext still mounting) — retry.
-        console.warn('[Dashboard] Socket not ready yet — retrying in 300ms');
-        retryTimerRef.current = setTimeout(() => {
-          retryTimerRef.current = null;
-          handleTrackingForStatus(status);
-        }, 300);
-      }
-    } else if (!shouldTrack && trackingRef.current) {
-      stopTracking();
-      trackingRef.current = false;
-      setTracking(false);
-    }
-  }, []);
+  
 
   // ── Change availability status ────────────────────────────────────────────
   const changeStatus = async (action) => {

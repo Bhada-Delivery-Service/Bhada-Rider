@@ -91,6 +91,17 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
       setUnseenCount(unseen);
     });
 
+    // ── Real-time data sync → dispatch as window CustomEvents so individual
+    // pages (OrdersPage, OrderDetailPage, DashboardPage) can subscribe without
+    // prop drilling. The backend emits these events to the rider's socket room.
+    socket.on('order:updated', (data) => {
+      window.dispatchEvent(new CustomEvent('ws:order:updated', { detail: data }));
+    });
+
+    socket.on('rider:updated', (data) => {
+      window.dispatchEvent(new CustomEvent('ws:rider:updated', { detail: data }));
+    });
+
     fetchNotifications();
 
     return () => {
@@ -98,6 +109,8 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
       // that's handled by the accessToken=null cleanup effect below)
       socket.off('notification:new');
       socket.off('notification:count');
+      socket.off('order:updated');
+      socket.off('rider:updated');
     };
   }, [accessToken, fetchNotifications, onOnboardingApproved]);
 

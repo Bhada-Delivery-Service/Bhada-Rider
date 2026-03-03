@@ -44,16 +44,54 @@ export default function OrdersPage() {
 
   useEffect(() => { fetchOrders(); }, []);
 
-  // Listen for real-time new order notifications via socket.
-  // The backend only emits 'notification:new' with type ORDER_AVAILABLE to
-  // riders who are in the eligibleRiderIds list — so this event fires ONLY
-  // for eligible riders. We auto-refresh the available orders list when it fires.
+  // ── Real-time: listen for order status changes from the backend ───────────
+  // ws:order:updated fires when:
+  //   - A new PLACED order becomes available to this rider (ORDER_AVAILABLE notification also fires)
+  //   - An order the rider accepted changes status (READY, DISPATCHED, DELIVERED, CANCELLED)
+  useEffect(() => {
+    const handler = (e) => {
+      const updated = e.detail;
+      if (!updated?.orderId) return;
+
+      // If the order is now PLACED and not yet in our available list → fetch fresh list
+      // (can't add directly since eligibility is server-side)
+      if (updated.status === 'PLACED') {
+        fetchOrders();
+        return;
+      }
+
+      // For CANCELLED — remove from both lists immediately
+      if (updated.status === 'CANCELLED') {
+        setAvailableOrders(prev => prev.filter(o => (o.orderId || o.id) !== updated.orderId));
+        setMyOrders(prev => prev.filter(o => (o.orderId || o.id) !== updated.orderId));
+        return;
+      }
+
+      // For READY / DISPATCHED / DELIVERED — update myOrders list in place
+      setMyOrders(prev => {
+        const exists = prev.some(o => (o.orderId || o.id) === updated.orderId);
+        if (exists) return prev.map(o => (o.orderId || o.id) === updated.orderId ? { ...o, ...updated } : o);
+        // Order just moved to rider (just accepted) — add to myOrders
+        if (updated.assignedRiderId) return [updated, ...prev];
+        return prev;
+      });
+
+      // Remove from available list once it's no longer PLACED
+      setAvailableOrders(prev => prev.filter(o => (o.orderId || o.id) !== updated.orderId));
+    };
+
+    window.addEventListener('ws:order:updated', handler);
+    return () => window.removeEventListener('ws:order:updated', handler);
+  }, []);
+
+  // Keep the notification:new → ORDER_AVAILABLE handler for backward compatibility
+  // (fires for eligible riders when a new order is broadcast)
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
     const handleNewNotification = (n) => {
       if (n?.type === 'ORDER_AVAILABLE') {
-        fetchOrders(); // backend already filtered — safe to refresh
+        fetchOrders();
         toast('📦 New order available!', { duration: 3000 });
       }
     };
