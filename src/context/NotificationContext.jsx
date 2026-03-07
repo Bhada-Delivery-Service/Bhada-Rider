@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { notificationsAPI } from '../services/api';
+import { notificationsAPI, ordersAPI } from '../services/api';
 import { connectSocket, disconnectSocket } from '../services/socketService';
 
 const NotificationContext = createContext(null);
@@ -30,7 +30,12 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
   const [unseenCount,   setUnseenCount]     = useState(0);
   const [loading,       setLoading]         = useState(false);
   const [drawerOpen,    setDrawerOpen]      = useState(false);
+  const [alertOrder,    setAlertOrder]      = useState(null); // triggers NewOrderAlert
   const socketRef = useRef(null);
+  // Keep a ref to onOnboardingApproved so the socket handler always calls the
+  // latest version without needing it as an effect dependency.
+  const onOnboardingApprovedRef = useRef(onOnboardingApproved);
+  useEffect(() => { onOnboardingApprovedRef.current = onOnboardingApproved; }, [onOnboardingApproved]);
 
   // ── Fetch from REST ──────────────────────────────────────────────────────
   const fetchNotifications = useCallback(async () => {
@@ -68,7 +73,25 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
 
       // Special case: onboarding approved → trigger re-fetch of rider status
       if (n.type === 'ONBOARDING_APPROVED') {
-        onOnboardingApproved?.();
+        onOnboardingApprovedRef.current?.();
+      }
+
+      // New order available → fetch full order details then show ring alert
+      if (n.type === 'ORDER_AVAILABLE') {
+        ordersAPI.getAvailable()
+          .then(({ data }) => {
+            // data may be an array directly or wrapped in data.data / data.orders
+            const list = Array.isArray(data) ? data
+              : Array.isArray(data?.data) ? data.data
+              : Array.isArray(data?.orders) ? data.orders
+              : [];
+            const order = list[0] || null;
+            setAlertOrder(order || n); // fallback to bare notification if fetch fails
+          })
+          .catch(() => {
+            setAlertOrder(n); // fallback — alert still shows even without details
+          });
+        return; // skip the generic toast — the alert modal replaces it
       }
 
       // Show toast for all events
@@ -95,6 +118,10 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
     // pages (OrdersPage, OrderDetailPage, DashboardPage) can subscribe without
     // prop drilling. The backend emits these events to the rider's socket room.
     socket.on('order:updated', (data) => {
+      // New PLACED order → trigger the ring alert for the rider
+      if (data?.status === 'PLACED') {
+        setAlertOrder(data);
+      }
       window.dispatchEvent(new CustomEvent('ws:order:updated', { detail: data }));
     });
 
@@ -102,7 +129,19 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
       window.dispatchEvent(new CustomEvent('ws:rider:updated', { detail: data }));
     });
 
-    fetchNotifications();
+    // Fetch initial notifications inline (not via fetchNotifications callback)
+    // so this effect only re-runs when accessToken actually changes — not when
+    // the fetchNotifications useCallback reference changes.
+    if (accessToken) {
+      setLoading(true);
+      notificationsAPI.getAll(30)
+        .then(({ data }) => {
+          setNotifications(data.data || []);
+          setUnseenCount(data.unseen ?? 0);
+        })
+        .catch(e => console.error('[Notif:Rider] fetch failed', e))
+        .finally(() => setLoading(false));
+    }
 
     return () => {
       // BUG FIX: clean up specific listeners (don't destroy socket here —
@@ -112,7 +151,10 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
       socket.off('order:updated');
       socket.off('rider:updated');
     };
-  }, [accessToken, fetchNotifications, onOnboardingApproved]);
+  // IMPORTANT: Only accessToken here. fetchNotifications and onOnboardingApproved
+  // must NOT be deps — they are either called inline or via a ref to prevent
+  // this effect from re-running (and re-creating the socket) on every render.
+  }, [accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cleanup on logout
   useEffect(() => {
@@ -143,11 +185,13 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
 
   const openDrawer  = useCallback(() => setDrawerOpen(true),  []);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const dismissAlert = useCallback(() => setAlertOrder(null), []);
 
   return (
     <NotificationContext.Provider value={{
       notifications, unseenCount, loading, drawerOpen,
       fetchNotifications, markSeen, markAllSeen, openDrawer, closeDrawer,
+      alertOrder, dismissAlert,
     }}>
       {children}
     </NotificationContext.Provider>

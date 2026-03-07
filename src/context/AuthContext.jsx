@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authAPI, ridersAPI } from '../services/api';
 
 const AuthContext = createContext(null);
@@ -79,11 +79,13 @@ export function AuthProvider({ children }) {
     await fetchRiderStatus(userData.uid);
   };
 
-  const updateRider = (riderData) => {
+  // useCallback gives updateRider a stable reference so hooks that list it
+  // as a dependency (e.g. useRiderStatus.fetchData) don't re-run on every render.
+  const updateRider = useCallback((riderData) => {
     localStorage.setItem('rider', JSON.stringify(riderData));
     setRider(riderData);
     setOnboardingStatus(riderData.onboardingStatus || 'NOT_SUBMITTED');
-  };
+  }, []); // setRider / setOnboardingStatus are stable setState dispatchers
 
   const refreshOnboardingStatus = async () => {
     if (user?.uid) await fetchRiderStatus(user.uid);

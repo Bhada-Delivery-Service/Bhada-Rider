@@ -7,6 +7,13 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ordersAPI } from '../services/api';
+import { useActionGuard } from '../hooks/useActionGuard';
+import { logger } from '../utils/logger';
+import StatusStepper from '../components/ui/StatusStepper';
+import OTPModal from '../components/order/OTPModal';
+import { SkeletonCard } from '../components/ui/SkeletonLoader';
+
+const log = logger('OrderDetail');
 
 /* ─── Google Maps ─────────────────────────────────────────────────────────── */
 const GMAP_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
@@ -141,41 +148,17 @@ function ImageGallery({ images, itemName }) {
   );
 }
 
-/* ─── OTP Input ───────────────────────────────────────────────────────────── */
-function OtpInput({ label, onSubmit, onCancel, loading }) {
-  const [otp, setOtp] = useState('');
-  return (
-    <div style={{ background: 'var(--bg-2)', borderRadius: 12, padding: 16, marginTop: 10 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 10 }}>
-        {label === 'Pickup'
-          ? 'Enter the Pickup OTP the sender gives you to confirm parcel handover'
-          : 'Ask the receiver for their Drop OTP and enter it below to confirm delivery'}
-      </div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input className="form-input" placeholder="• • • •" value={otp}
-          onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-          style={{ flex: 1, fontFamily: 'var(--font-mono)', letterSpacing: '0.2em', fontSize: 20, textAlign: 'center' }}
-          maxLength={6} autoFocus />
-        <button className="btn btn-primary btn-sm" onClick={() => { onSubmit(otp); setOtp(''); }} disabled={loading || otp.length < 4}>
-          <CheckCircle size={14} /> OK
-        </button>
-      </div>
-      <button className="btn btn-ghost btn-sm" style={{ marginTop: 8, width: '100%' }} onClick={onCancel}>Cancel</button>
-    </div>
-  );
-}
-
 /* ─── Main Page ───────────────────────────────────────────────────────────── */
 export default function OrderDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
   const [showHandover, setShowHandover] = useState(false);
   const [showDeliver, setShowDeliver] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const { guard, anyLoading: actionLoading } = useActionGuard();
 
   const fetchOrder = async () => {
     setLoading(true);
@@ -201,9 +184,9 @@ export default function OrderDetailPage() {
     return () => window.removeEventListener('ws:order:updated', handler);
   }, [id]);
 
-  const handleAction = async (action, extra) => {
-    setActionLoading(true);
-    try {
+  const handleAction = (action, extra) => {
+    guard(async () => {
+      log.action(`order_${action}`, { orderId: id, action });
       if (action === 'accept') {
         await ordersAPI.accept(id);
         toast.success('Order accepted! 🎉');
@@ -217,12 +200,27 @@ export default function OrderDetailPage() {
         setShowCancel(false);
       }
       fetchOrder();
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Action failed');
-    } finally { setActionLoading(false); }
+    }, action).catch(err => {
+      toast.error(err.response?.data?.message || err.message || 'Action failed');
+      log.error(`order_${action} failed`, err);
+    });
   };
 
-  if (loading) return <div style={{ minHeight: '60vh', display: 'grid', placeItems: 'center' }}><div className="loader" /></div>;
+  if (loading) return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+        <div className="skeleton" style={{ width: 34, height: 34, borderRadius: 8 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="skeleton" style={{ width: 120, height: 18, borderRadius: 6 }} />
+          <div className="skeleton" style={{ width: 80, height: 11, borderRadius: 4 }} />
+        </div>
+      </div>
+      <div className="skeleton" style={{ width: '100%', height: 64, borderRadius: 12 }} />
+      <div className="skeleton" style={{ width: '100%', height: 200, borderRadius: 12 }} />
+      <SkeletonCard rows={3} />
+      <SkeletonCard rows={3} />
+    </div>
+  );
 
   if (!order) return (
     <div style={{ textAlign: 'center', padding: 48 }}>
@@ -258,6 +256,9 @@ export default function OrderDetailPage() {
         </div>
       </div>
 
+      {/* Status stepper */}
+      <StatusStepper status={status} />
+
       {/* Map */}
       {hasCoords && <OrderMap order={order} />}
 
@@ -275,22 +276,20 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      {/* Pickup OTP — READY status: rider reads this OTP to sender, sender enters it in their app */}
+      {/* Pickup OTP — READY: show large OTP for rider to read to sender */}
       {status === 'READY' && order.pickupOtp && (
-        <div style={{ marginBottom: 16, background: 'rgba(0,229,160,0.06)', border: '1.5px solid rgba(0,229,160,0.3)', borderRadius: 14, padding: 16 }}>
-          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent)', letterSpacing: '0.06em', marginBottom: 8 }}>📦 PICKUP OTP — Tell This to Sender</div>
+        <div className="otp-display-card" style={{ marginBottom: 16 }}>
+          <div className="otp-display-label">📦 Pickup OTP — Tell This to Sender</div>
           <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 12, lineHeight: 1.5 }}>
-            Read this OTP to the sender. They will enter it in their app to confirm handover and pass the package to you.
+            Read this OTP to the sender. They will enter it in their app to confirm handover.
           </div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 42, fontWeight: 900, color: 'var(--accent)', letterSpacing: '0.2em', textAlign: 'center' }}>
-            {order.pickupOtp}
-          </div>
+          <div className="otp-display-code">{order.pickupOtp}</div>
         </div>
       )}
 
-      {/* DISPATCHED: rider sees pickupOtp for reference; enters dropOtp from receiver */}
+      {/* DISPATCHED: pickup OTP confirmed reference */}
       {status === 'DISPATCHED' && order.pickupOtp && (
-        <div style={{ marginBottom: 16, background: 'rgba(0,229,160,0.06)', border: '1px solid rgba(0,229,160,0.2)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
+        <div style={{ marginBottom: 12, background: 'rgba(0,229,160,0.06)', border: '1px solid rgba(0,229,160,0.2)', borderRadius: 12, padding: '10px 14px', textAlign: 'center' }}>
           <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent)', letterSpacing: '0.06em', marginBottom: 4 }}>PICKUP OTP (confirmed)</div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 26, fontWeight: 800, color: 'var(--accent)', letterSpacing: '0.15em' }}>{order.pickupOtp}</div>
         </div>
@@ -324,6 +323,61 @@ export default function OrderDetailPage() {
         )}
       </div>
 
+      {/* Sender & Receiver Details */}
+      <div className="card" style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', letterSpacing: '0.06em', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Hash size={11} /> PEOPLE
+        </div>
+
+        {/* Sender */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: '#00e5a0', letterSpacing: '0.08em', marginBottom: 6 }}>SENDER</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>
+                {[order.sender?.firstName, order.sender?.lastName].filter(Boolean).join(' ') || order.senderNode?.contactPerson || '—'}
+              </div>
+              {order.sender?.phoneNumber && (
+                <div style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>{order.sender.phoneNumber}</div>
+              )}
+            </div>
+            {order.sender?.phoneNumber && (
+              <a
+                href={`tel:${order.sender.phoneNumber}`}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, borderRadius: '50%', background: 'var(--accent-dim)', color: 'var(--accent)', textDecoration: 'none', flexShrink: 0 }}
+              >
+                <Phone size={15} />
+              </a>
+            )}
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', marginBottom: 12 }} />
+
+        {/* Receiver */}
+        <div>
+          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: '#ff4d6d', letterSpacing: '0.08em', marginBottom: 6 }}>RECEIVER</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>
+                {[order.receiver?.firstName, order.receiver?.lastName].filter(Boolean).join(' ') || order.receiverNode?.contactPerson || '—'}
+              </div>
+              {order.receiver?.phoneNumber && (
+                <div style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>{order.receiver.phoneNumber}</div>
+              )}
+            </div>
+            {order.receiver?.phoneNumber && (
+              <a
+                href={`tel:${order.receiver.phoneNumber}`}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, borderRadius: '50%', background: 'rgba(255,77,109,0.1)', color: '#ff4d6d', textDecoration: 'none', flexShrink: 0 }}
+              >
+                <Phone size={15} />
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Items with Images */}
       {order.items?.length > 0 && (
         <div className="card" style={{ marginBottom: 10 }}>
@@ -344,7 +398,6 @@ export default function OrderDetailPage() {
                   {[item.type, item.category].filter(Boolean).join(' · ')}
                 </div>
               )}
-              {/* IMAGES */}
               <ImageGallery images={item.images} itemName={item.name} />
             </div>
           ))}
@@ -368,24 +421,55 @@ export default function OrderDetailPage() {
         ))}
       </div>
 
-      {/* OTP Inputs */}
-      {showDeliver  && <OtpInput label="Delivery" loading={actionLoading} onSubmit={otp => handleAction('deliver', otp)}  onCancel={() => setShowDeliver(false)} />}
+      {/* Bottom padding for sticky bar */}
+      <div style={{ height: 90 }} />
 
+      {/* ── Full-screen OTP Modals ── */}
+      {showDeliver && (
+        <OTPModal
+          type="delivery"
+          loading={actionLoading}
+          onSubmit={otp => handleAction('deliver', otp)}
+          onCancel={() => setShowDeliver(false)}
+        />
+      )}
+
+      {/* Cancel form (inline, not full-screen) */}
       {showCancel && (
-        <div style={{ background: 'var(--bg-2)', borderRadius: 12, padding: 16, marginTop: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Cancel Delivery</div>
-          <textarea className="form-textarea" placeholder="Reason (optional)..." value={cancelReason}
-            onChange={e => setCancelReason(e.target.value)} style={{ minHeight: 72, width: '100%', marginBottom: 10 }} />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={() => setShowCancel(false)}>Back</button>
-            <button className="btn btn-danger btn-sm" style={{ flex: 1 }} disabled={actionLoading} onClick={() => handleAction('cancel', cancelReason)}>Cancel</button>
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9000,
+          background: 'rgba(5,8,15,0.96)', backdropFilter: 'blur(12px)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          padding: '0 24px',
+        }}>
+          <div style={{
+            width: '100%', maxWidth: 360,
+            background: 'var(--bg-1)', border: '1px solid var(--border)',
+            borderRadius: 20, padding: 24,
+          }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Cancel Delivery</div>
+            <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16 }}>Let us know why you need to cancel this delivery.</div>
+            <textarea
+              className="form-textarea"
+              placeholder="Reason (optional)..."
+              value={cancelReason}
+              onChange={e => setCancelReason(e.target.value)}
+              style={{ minHeight: 88, width: '100%', marginBottom: 14 }}
+            />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowCancel(false)}>Back</button>
+              <button className="btn btn-danger" style={{ flex: 1 }} disabled={actionLoading} onClick={() => handleAction('cancel', cancelReason)}>
+                Cancel Delivery
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Action Bar — inline below all content */}
-      {!showHandover && !showDeliver && !showCancel && (
-        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+      {/* ── Sticky action bar ── */}
+      {!showDeliver && !showCancel && (
+        <div className="sticky-action-bar">
           {status === 'PLACED' && (
             <>
               <button className="btn btn-primary" style={{ flex: 1 }} disabled={actionLoading} onClick={() => handleAction('accept')}>
@@ -395,11 +479,9 @@ export default function OrderDetailPage() {
             </>
           )}
           {status === 'READY' && (
-            <>
-              <button className="btn btn-danger btn-sm" style={{ flex: 1 }} onClick={() => setShowCancel(true)}>
-                <X size={15} /> Cancel Delivery
-              </button>
-            </>
+            <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => setShowCancel(true)}>
+              <X size={15} /> Cancel Delivery
+            </button>
           )}
           {status === 'DISPATCHED' && (
             <>

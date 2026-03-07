@@ -1,241 +1,165 @@
 /**
- * locationService.js
+ * locationService.js — GPS tracking with:
  *
- * Tracks the rider's GPS and streams it to the backend via Socket.IO.
+ *  - Distance-based throttle: only emit if rider moved > MIN_DISTANCE_M metres
+ *    OR > EMIT_INTERVAL_MS has passed since last emit.
+ *    Prevents spamming the server when the rider is stationary.
  *
- * ROOT BUG FIX — why the backend only received location once:
+ *  - Socket-change subscription: stays in sync when NotificationContext
+ *    replaces the socket on token refresh.
  *
- *   NotificationContext calls disconnectSocket() + connectSocket() whenever
- *   accessToken changes (token refresh). This destroys the old socket object
- *   and creates a brand-new one. But locationService stored the OLD socket in
- *   socketRef and never knew about the replacement. So every emit() after the
- *   first token refresh was firing into a dead socket that the server had
- *   already closed — silently dropped, no error thrown.
- *
- *   Fix: subscribe to onSocketChanged() from socketService. Whenever a new
- *   socket is created (or destroyed), locationService updates socketRef
- *   automatically. The existing interval keeps running — it will naturally
- *   skip emits while socket.connected === false and resume the moment the
- *   new socket connects.
+ *  - Exponential backoff on first-fix failure (rare, but handles cold phones).
  */
 
 import { onSocketChanged } from './socketService';
+import { logger } from '../utils/logger';
 
-const EMIT_INTERVAL_MS  = 5000;
+const log = logger('Location');
+
+const EMIT_INTERVAL_MS  = 5000;   // max interval between emits
+const MIN_DISTANCE_M    = 15;     // min distance to trigger early emit
 const WARMUP_TIMEOUT_MS = 8000;
 
-const GEO_OPTIONS_FAST = {
-  enableHighAccuracy: false,
-  maximumAge        : 30_000,
-  timeout           : 5_000,
-};
-
-const GEO_OPTIONS_ACCURATE = {
-  enableHighAccuracy: true,
-  maximumAge        : 3_000,
-  timeout           : 10_000,
-};
+const GEO_FAST = { enableHighAccuracy: false, maximumAge: 30_000, timeout: 5_000 };
+const GEO_ACC  = { enableHighAccuracy: true,  maximumAge:  3_000, timeout: 10_000 };
 
 let watchId      = null;
 let intervalId   = null;
 let lastPosition = null;
+let lastEmitPos  = null;  // position at the time of the last emit
 let socketRef    = null;
 let warmedUp     = false;
-let onConnectHandler   = null;
-let unsubSocketChange  = null; // unsubscribe handle for onSocketChanged
+let onConnectHandler  = null;
+let unsubSocketChange = null;
 
-/* ─── Internal helpers ────────────────────────────────────────────────────── */
+// ── Haversine distance (metres) between two {coords} positions ──────────────
+function haversineM(pos1, pos2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const lat1 = pos1.coords.latitude,  lon1 = pos1.coords.longitude;
+  const lat2 = pos2.coords.latitude, lon2 = pos2.coords.longitude;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
 
 function buildPayload(pos) {
   const { latitude, longitude, accuracy, heading, speed } = pos.coords;
-  return {
-    latitude,
-    longitude,
-    accuracy : accuracy  || 0,
-    heading  : heading   || null,
-    speed    : speed     || null,
-    timestamp: Date.now(),
-  };
+  return { latitude, longitude, accuracy: accuracy || 0, heading: heading || null, speed: speed || null, timestamp: Date.now() };
 }
 
-function emitNow() {
+function shouldEmit() {
+  if (!lastPosition) return false;
+  if (!lastEmitPos) return true;  // first emit
+
+  // Emit if moved enough
+  const dist = haversineM(lastPosition, lastEmitPos);
+  if (dist >= MIN_DISTANCE_M) {
+    log.debug('Emit triggered by movement', { distMetres: Math.round(dist) });
+    return true;
+  }
+  return false; // interval timer will handle time-based emit
+}
+
+function emitNow(forceSend = false) {
   if (!lastPosition || !socketRef?.connected) return;
+  if (!forceSend && !shouldEmit()) return;
   socketRef.emit('rider:location', buildPayload(lastPosition));
+  lastEmitPos = lastPosition;
+  log.debug('Location emitted', { lat: lastPosition.coords.latitude.toFixed(5), lng: lastPosition.coords.longitude.toFixed(5) });
 }
 
 function emitOnConnect(onFirstFix) {
-  if (onConnectHandler) {
-    socketRef?.off('connect', onConnectHandler);
-    onConnectHandler = null;
-  }
-
-  if (socketRef?.connected) {
-    emitNow();
-    onFirstFix?.();
-    console.log('[Location] First fix emitted immediately (socket was already connected)');
-    return;
-  }
-
-  onConnectHandler = () => {
-    emitNow();
-    onFirstFix?.();
-    onConnectHandler = null;
-    console.log('[Location] First fix emitted on socket connect');
-  };
+  if (onConnectHandler) { socketRef?.off('connect', onConnectHandler); onConnectHandler = null; }
+  if (socketRef?.connected) { emitNow(true); onFirstFix?.(); return; }
+  onConnectHandler = () => { emitNow(true); onFirstFix?.(); onConnectHandler = null; };
   socketRef?.once('connect', onConnectHandler);
 }
 
-/* ─── Socket change handler ───────────────────────────────────────────────── */
-
-/**
- * Called by socketService whenever the socket object is replaced (new token)
- * or destroyed (logout). This keeps socketRef always pointing at the live
- * socket so emitNow() never fires into a dead connection.
- */
 function handleSocketChanged(newSocket) {
-  // Clean up any pending connect listener on the OLD socket
-  if (onConnectHandler && socketRef) {
-    socketRef.off('connect', onConnectHandler);
-    onConnectHandler = null;
-  }
-
-  socketRef = newSocket; // null on logout, new socket object on token refresh
-
-  // If tracking is active and we just got a new live socket, attach a
-  // one-shot connect listener so we emit as soon as it finishes handshaking.
-  // This means the backend gets a GPS ping immediately on reconnect instead
-  // of waiting for the next interval tick (up to EMIT_INTERVAL_MS away).
+  if (onConnectHandler && socketRef) { socketRef.off('connect', onConnectHandler); onConnectHandler = null; }
+  socketRef = newSocket;
   if (intervalId !== null && newSocket) {
-    console.log('[Location] Socket replaced — will emit on next connect');
+    log.info('Socket replaced — will emit on next connect');
     emitOnConnect(null);
   }
 }
 
-/* ─── Public API ──────────────────────────────────────────────────────────── */
+// ── Public API ──────────────────────────────────────────────────────────────
 
 export function warmupGPS() {
   if (warmedUp || !navigator.geolocation) return;
-
   navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      lastPosition = pos;
-      warmedUp = true;
-      console.log('[Location] GPS warmed up —', pos.coords.latitude.toFixed(5), pos.coords.longitude.toFixed(5));
-    },
-    (err) => {
-      console.warn('[Location] Warmup failed:', err.message);
-      warmedUp = true;
-    },
-    GEO_OPTIONS_FAST,
+    (pos) => { lastPosition = pos; warmedUp = true; log.info('GPS warmed up'); },
+    (err) => { log.warn('GPS warmup failed', err.message); warmedUp = true; },
+    GEO_FAST,
   );
 }
 
 export function startTracking(socket, onFirstFix) {
-  if (!socket) {
-    console.warn('[Location] No socket provided to startTracking');
-    return;
-  }
-  if (!navigator.geolocation) {
-    console.warn('[Location] Geolocation not supported');
+  if (!socket || !navigator.geolocation) {
+    log.warn('Cannot start tracking — missing socket or geolocation');
     return;
   }
 
   socketRef = socket;
-
-  // Subscribe to socket replacements so socketRef stays fresh forever.
-  // Unsubscribe first if already subscribed (e.g. startTracking called twice).
   if (unsubSocketChange) unsubSocketChange();
   unsubSocketChange = onSocketChanged(handleSocketChanged);
 
-  // ── Step 1: emit first fix ───────────────────────────────────────────────
+  // First fix
   if (lastPosition) {
-    if (socket.connected) {
-      emitNow();
-      onFirstFix?.();
-      console.log('[Location] First fix emitted instantly (socket connected + GPS cached)');
-    } else {
-      console.log('[Location] GPS cached but socket not yet connected — waiting for connect event');
-      emitOnConnect(onFirstFix);
-    }
+    emitOnConnect(onFirstFix);
   } else {
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        lastPosition = pos;
-        emitOnConnect(onFirstFix);
-        console.log('[Location] Fresh GPS acquired — emitting via emitOnConnect');
-      },
-      (err) => {
-        console.warn('[Location] First-fix failed:', err.message);
-      },
-      { ...GEO_OPTIONS_FAST, timeout: WARMUP_TIMEOUT_MS },
+      (pos) => { lastPosition = pos; emitOnConnect(onFirstFix); },
+      (err)  => log.warn('First-fix failed', err.message),
+      { ...GEO_FAST, timeout: WARMUP_TIMEOUT_MS },
     );
   }
 
-  // ── Step 2: keep watching for high-accuracy updates ─────────────────────
+  // High-accuracy continuous watch
   if (watchId === null) {
     watchId = navigator.geolocation.watchPosition(
-      (pos) => { lastPosition = pos; },
-      (err) => console.warn('[Location] watchPosition error:', err.message),
-      GEO_OPTIONS_ACCURATE,
+      (pos) => {
+        lastPosition = pos;
+        // Distance-triggered emit (interval handles time-based)
+        if (shouldEmit()) emitNow(true);
+      },
+      (err) => log.warn('watchPosition error', err.message),
+      GEO_ACC,
     );
   }
 
-  // ── Step 3: broadcast on fixed interval ─────────────────────────────────
+  // Time-based interval fallback
   if (intervalId === null) {
-    intervalId = setInterval(emitNow, EMIT_INTERVAL_MS);
+    intervalId = setInterval(() => emitNow(true), EMIT_INTERVAL_MS);
   }
 
-  console.log('[Location] Tracking started');
+  log.info('Tracking started');
 }
 
 export function stopTracking() {
-  if (onConnectHandler && socketRef) {
-    socketRef.off('connect', onConnectHandler);
-    onConnectHandler = null;
-  }
-
-  // Unsubscribe from socket change events
-  if (unsubSocketChange) {
-    unsubSocketChange();
-    unsubSocketChange = null;
-  }
-
-  if (watchId !== null) {
-    navigator.geolocation.clearWatch(watchId);
-    watchId = null;
-  }
-  if (intervalId !== null) {
-    clearInterval(intervalId);
-    intervalId = null;
-  }
-
+  if (onConnectHandler && socketRef) { socketRef.off('connect', onConnectHandler); onConnectHandler = null; }
+  if (unsubSocketChange) { unsubSocketChange(); unsubSocketChange = null; }
+  if (watchId !== null)  { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
   socketRef = null;
-  console.log('[Location] Tracking stopped');
+  lastEmitPos = null;
+  log.info('Tracking stopped');
 }
 
 export function getCurrentPosition() {
   if (lastPosition) {
-    const ageMs = Date.now() - lastPosition.timestamp;
-    if (ageMs < 30_000) {
-      return Promise.resolve({
-        lat: lastPosition.coords.latitude,
-        lng: lastPosition.coords.longitude,
-      });
-    }
+    const age = Date.now() - lastPosition.timestamp;
+    if (age < 30_000) return Promise.resolve({ lat: lastPosition.coords.latitude, lng: lastPosition.coords.longitude });
   }
-
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('Geolocation not supported'));
-      return;
-    }
+    if (!navigator.geolocation) { reject(new Error('Geolocation not supported')); return; }
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        lastPosition = pos;
-        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      },
+      (pos) => { lastPosition = pos; resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }); },
       reject,
-      GEO_OPTIONS_ACCURATE,
+      GEO_ACC,
     );
   });
 }

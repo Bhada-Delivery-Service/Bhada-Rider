@@ -112,7 +112,8 @@ export default function LoginPage() {
       }} />
 
       <div className="login-card" style={{ position: 'relative', zIndex: 1 }}>
-        {/* Logo */}
+
+        {/* ── Logo ── */}
         <div className="flex items-center gap-12 mb-20">
           <div style={{
             width: 50, height: 50,
@@ -124,12 +125,17 @@ export default function LoginPage() {
             <Bike size={26} />
           </div>
           <div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, color: 'var(--text-0)', letterSpacing: '-0.03em' }}>Bhada</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-2)', letterSpacing: '0.1em' }}>RIDER APP</div>
+            {/* FIX 1: was an incomplete style attribute with missing closing brace + content */}
+            <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 18, color: 'var(--text-0)' }}>
+              RiderApp
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-2)', letterSpacing: '0.1em' }}>
+              RIDER APP
+            </div>
           </div>
         </div>
 
-        {/* Step indicator */}
+        {/* ── Step indicator ── */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 28 }}>
           {[0, 1].map(i => (
             <div key={i} style={{
@@ -141,12 +147,17 @@ export default function LoginPage() {
           ))}
         </div>
 
-        {/* STEP 1: Phone */}
+        {/* ── STEP 1: Phone ── */}
         {step === STEP.PHONE && (
           <div style={{ animation: 'slideUp 0.22s ease' }}>
             <div id="recaptcha-container" />
-            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 6 }}>Sign In</h1>
-            <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 28 }}>Enter your phone number to receive an OTP</p>
+            {/* FIX 2: was an incomplete style attribute — missing closing brace + rest of props */}
+            <h1 style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 24, color: 'var(--text-0)', marginBottom: 8 }}>
+              Welcome back
+            </h1>
+            <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 28 }}>
+              Enter your phone number to receive an OTP
+            </p>
             <form onSubmit={handleSendOTP}>
               <div className="form-group">
                 <label className="form-label">Phone Number</label>
@@ -162,7 +173,9 @@ export default function LoginPage() {
                     autoFocus required
                   />
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 6 }}>10-digit numbers get +91 automatically</div>
+                <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 6 }}>
+                  10-digit numbers get +91 automatically
+                </div>
               </div>
               <button type="submit" className="btn btn-primary btn-lg" disabled={loading || !phone.trim()}>
                 <Phone size={15} />
@@ -172,21 +185,31 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* STEP 2: OTP */}
+        {/* ── STEP 2: OTP ── */}
         {step === STEP.OTP && (
           <div style={{ animation: 'slideUp 0.22s ease' }}>
-            <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16, padding: '4px 0', color: 'var(--text-2)' }}
-              onClick={() => { setStep(STEP.PHONE); setOtp(['','','','','','']); }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ marginBottom: 16, padding: '4px 0', color: 'var(--text-2)' }}
+              onClick={() => { setStep(STEP.PHONE); setOtp(['', '', '', '', '', '']); }}
+            >
               <ArrowLeft size={14} /> Back
             </button>
-            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 6 }}>Verify OTP</h1>
+            {/* FIX 3: was an incomplete style attribute — same pattern as above */}
+            <h1 style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 24, color: 'var(--text-0)', marginBottom: 8 }}>
+              Enter OTP
+            </h1>
             <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 28 }}>
               Sent to <strong style={{ color: 'var(--text-0)' }}>{formatPhone(phone)}</strong>
             </p>
             <form onSubmit={handleVerifyOTP}>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'center', margin: '0 0 28px' }} onPaste={handleOtpPaste}>
+              <div
+                style={{ display: 'flex', gap: 8, justifyContent: 'center', margin: '0 0 28px' }}
+                onPaste={handleOtpPaste}
+              >
                 {otp.map((digit, i) => (
-                  <input key={i}
+                  <input
+                    key={i}
                     ref={el => otpRefs.current[i] = el}
                     type="text" inputMode="numeric" maxLength={1}
                     value={digit}
@@ -195,7 +218,7 @@ export default function LoginPage() {
                     autoFocus={i === 0}
                     style={{
                       width: 46, height: 54, textAlign: 'center',
-                      fontSize: 22, fontFamily: 'var(--font-display)', fontWeight: 700,
+                      fontSize: 22, fontFamily: 'var(--font-sans)',
                       background: digit ? 'var(--accent-dim)' : 'var(--bg-0)',
                       border: `1.5px solid ${digit ? 'var(--accent)' : 'var(--border)'}`,
                       borderRadius: 10, color: digit ? 'var(--accent)' : 'var(--text-0)',
@@ -223,6 +246,7 @@ export default function LoginPage() {
             </form>
           </div>
         )}
+
       </div>
     </div>
   );

@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { User, Car, FileText, Send, CheckCircle, Clock, XCircle, RefreshCw, ChevronRight, Edit2, X, Banknote } from 'lucide-react';
+import { User, Car, FileText, Send, CheckCircle, Clock, XCircle, RefreshCw, ChevronRight, Edit2, X, Banknote, Sun, Moon, Languages } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ridersAPI, filesAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+import { useLang } from '../context/LangContext';
 
 function BankAccountModal({ uid, riderData, onClose, onSave }) {
+  const { t } = useLang();
   const [form, setForm] = useState({
     bankAccountHolderName: riderData?.bankAccountHolderName || '',
     bankAccountNumber: riderData?.bankAccountNumber || '',
@@ -47,7 +50,7 @@ function BankAccountModal({ uid, riderData, onClose, onSave }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">Payout Account</div>
+          <div className="modal-title">{t('payout_account')}</div>
           <button className="modal-close" onClick={onClose}><X size={14} /></button>
         </div>
 
@@ -56,7 +59,7 @@ function BankAccountModal({ uid, riderData, onClose, onSave }) {
           display: 'flex', background: 'var(--bg-2)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius-sm)', padding: 3, marginBottom: 20,
         }}>
-          {[{ key: 'bank', label: '🏦 Bank' }, { key: 'upi', label: '📱 UPI' }].map(({ key, label }) => (
+          {[{ key: 'bank', label: t('bank') }, { key: 'upi', label: t('upi') }].map(({ key, label }) => (
             <button key={key} onClick={() => setMode(key)} style={{
               flex: 1, background: mode === key ? 'var(--bg-1)' : 'transparent',
               border: `1px solid ${mode === key ? 'var(--border-bright)' : 'transparent'}`,
@@ -70,38 +73,38 @@ function BankAccountModal({ uid, riderData, onClose, onSave }) {
         {mode === 'bank' ? (
           <>
             <div className="form-group">
-              <label className="form-label">Account Holder Name *</label>
-              <input className="form-input" placeholder="As on bank passbook"
+              <label className="form-label">{t('account_holder')}</label>
+              <input className="form-input" {...{placeholder:t('account_holder_ph')}}
                 value={form.bankAccountHolderName} onChange={e => upd('bankAccountHolderName', e.target.value)} />
             </div>
             <div className="form-group">
-              <label className="form-label">Account Number *</label>
-              <input className="form-input" placeholder="e.g. 1234567890"
+              <label className="form-label">{t('account_number')}</label>
+              <input className="form-input" {...{placeholder:t('account_number_ph')}}
                 value={form.bankAccountNumber} onChange={e => upd('bankAccountNumber', e.target.value.replace(/\D/g, ''))} />
             </div>
             <div className="form-group">
-              <label className="form-label">IFSC Code *</label>
-              <input className="form-input" placeholder="e.g. SBIN0001234"
+              <label className="form-label">{t('ifsc_code')}</label>
+              <input className="form-input" {...{placeholder:t('ifsc_ph')}}
                 value={form.bankIfscCode} onChange={e => upd('bankIfscCode', e.target.value.toUpperCase())} />
             </div>
             <div className="form-group">
-              <label className="form-label">Bank Name</label>
-              <input className="form-input" placeholder="e.g. State Bank of India"
+              <label className="form-label">{t('bank_name')}</label>
+              <input className="form-input" {...{placeholder:t('bank_name_ph')}}
                 value={form.bankName} onChange={e => upd('bankName', e.target.value)} />
             </div>
           </>
         ) : (
           <div className="form-group">
-            <label className="form-label">UPI ID *</label>
-            <input className="form-input" placeholder="e.g. yourname@upi"
+            <label className="form-label">{t('upi_id')}</label>
+            <input className="form-input" {...{placeholder:t('upi_ph')}}
               value={form.upiId} onChange={e => upd('upiId', e.target.value.trim())} />
           </div>
         )}
 
         <div className="flex gap-8">
-          <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary flex-1" onClick={onClose}>{t('cancel')}</button>
           <button className="btn btn-primary flex-1" onClick={handleSave} disabled={loading}>
-            {loading ? 'Saving…' : 'Save'}
+            {loading ? t('saving') : t('save')}
           </button>
         </div>
       </div>
@@ -131,6 +134,7 @@ function StepIndicator({ steps, current }) {
 }
 
 function ProfileEditModal({ riderData, onClose, onSave, uid }) {
+  const { t } = useLang();
   const [form, setForm] = useState({
     firstName: riderData?.firstName || '',
     lastName: riderData?.lastName || '',
@@ -154,25 +158,25 @@ function ProfileEditModal({ riderData, onClose, onSave, uid }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">Edit Profile</div>
+          <div className="modal-title">{t('edit_profile')}</div>
           <button className="modal-close" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="form-group">
-          <label className="form-label">First Name</label>
+          <label className="form-label">{t('first_name')}</label>
           <input className="form-input" value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} />
         </div>
         <div className="form-group">
-          <label className="form-label">Last Name</label>
+          <label className="form-label">{t('last_name')}</label>
           <input className="form-input" value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} />
         </div>
         <div className="form-group">
-          <label className="form-label">Email</label>
+          <label className="form-label">{t('email')}</label>
           <input className="form-input" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
         </div>
         <div className="flex gap-8">
-          <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary flex-1" onClick={onClose}>{t('cancel')}</button>
           <button className="btn btn-primary flex-1" onClick={handleSave} disabled={loading}>
-            {loading ? 'Saving...' : 'Save'}
+            {loading ? t('saving') : t('save')}
           </button>
         </div>
       </div>
@@ -181,6 +185,7 @@ function ProfileEditModal({ riderData, onClose, onSave, uid }) {
 }
 
 function VehicleModal({ onClose, onSave, uid }) {
+  const { t } = useLang();
   const [form, setForm] = useState({ vehicleType: 'BIKE', vehicleNumber: '' });
   const [loading, setLoading] = useState(false);
 
@@ -201,11 +206,11 @@ function VehicleModal({ onClose, onSave, uid }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">Vehicle Details</div>
+          <div className="modal-title">{t('vehicle_details')}</div>
           <button className="modal-close" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="form-group">
-          <label className="form-label">Vehicle Type</label>
+          <label className="form-label">{t('vehicle_type')}</label>
           <select className="form-select" value={form.vehicleType} onChange={e => setForm(f => ({ ...f, vehicleType: e.target.value }))}>
             <option value="BIKE">Bike</option>
             <option value="SCOOTER">Scooter</option>
@@ -215,14 +220,14 @@ function VehicleModal({ onClose, onSave, uid }) {
           </select>
         </div>
         <div className="form-group">
-          <label className="form-label">Vehicle Number</label>
+          <label className="form-label">{t('vehicle_number')}</label>
           <input className="form-input" placeholder="e.g. MH01AB1234" value={form.vehicleNumber}
             onChange={e => setForm(f => ({ ...f, vehicleNumber: e.target.value.toUpperCase() }))} />
         </div>
         <div className="flex gap-8">
-          <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary flex-1" onClick={onClose}>{t('cancel')}</button>
           <button className="btn btn-primary flex-1" onClick={handleSave} disabled={loading}>
-            {loading ? 'Submitting...' : 'Submit Vehicle'}
+            {loading ? t('submitting') : t('submit_vehicle')}
           </button>
         </div>
       </div>
@@ -231,6 +236,7 @@ function VehicleModal({ onClose, onSave, uid }) {
 }
 
 function KycModal({ onClose, onSave, uid }) {
+  const { t } = useLang();
   const [form, setForm] = useState({ idProofType: 'AADHAR', idProofNumber: '' });
   const [loading, setLoading] = useState(false);
 
@@ -251,31 +257,29 @@ function KycModal({ onClose, onSave, uid }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">KYC Documents</div>
+          <div className="modal-title">{t('kyc_documents')}</div>
           <button className="modal-close" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="form-group">
-          <label className="form-label">ID Proof Type</label>
+          <label className="form-label">{t('id_proof_type')}</label>
           <select className="form-select" value={form.idProofType} onChange={e => setForm(f => ({ ...f, idProofType: e.target.value }))}>
-            <option value="AADHAR">Aadhaar Card</option>
-            <option value="PAN">PAN Card</option>
-            
-            <option value="DRIVING_LICENCE">Driving Licence</option>
-            
+            <option value="AADHAR">{t('aadhaar')}</option>
+            <option value="PAN">{t('pan')}</option>
+            <option value="DRIVING_LICENCE">{t('driving_licence')}</option>
           </select>
         </div>
         <div className="form-group">
-          <label className="form-label">ID Number</label>
+          <label className="form-label">{t('id_proof_number')}</label>
           <input className="form-input" placeholder="Enter ID number" value={form.idProofNumber}
             onChange={e => setForm(f => ({ ...f, idProofNumber: e.target.value.toUpperCase() }))} />
         </div>
         <div style={{ padding: '10px 12px', background: 'var(--blue-dim)', borderRadius: 8, fontSize: 12, color: 'var(--blue)', marginBottom: 16 }}>
-          ℹ️ Documents are reviewed by admin and verified within 24–48 hours.
+          {t('kyc_note')}
         </div>
         <div className="flex gap-8">
-          <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary flex-1" onClick={onClose}>{t('cancel')}</button>
           <button className="btn btn-primary flex-1" onClick={handleSave} disabled={loading}>
-            {loading ? 'Submitting...' : 'Submit KYC'}
+            {loading ? t('submitting') : t('submit_kyc')}
           </button>
         </div>
       </div>
@@ -285,6 +289,8 @@ function KycModal({ onClose, onSave, uid }) {
 
 export default function ProfilePage() {
   const { user, logout, updateRider } = useAuth();
+  const { theme, toggleTheme, isDark } = useTheme();
+  const { lang, setLang, t } = useLang();
   const [riderData, setRiderData] = useState(null);
   const [onboardingStatus, setOnboardingStatus] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -330,34 +336,34 @@ export default function ProfilePage() {
   const obStatus = rd?.onboardingStatus || 'NOT_SUBMITTED';
 
   const steps = [
-    { id: 'profile', title: 'Personal Profile', desc: 'Name, email, and contact info', done: !!(rd?.firstName) },
-    { id: 'vehicle', title: 'Vehicle Details', desc: 'Vehicle type and registration number', done: hasVehicle },
-    { id: 'kyc', title: 'KYC Documents', desc: 'Government ID verification', done: kycStatus === 'APPROVED' },
-    { id: 'onboarding', title: 'Onboarding Application', desc: 'Submit for admin review and approval', done: obStatus === 'APPROVED' },
+    { id: 'profile',    title: t('personal_profile'),  desc: t('name_email_info'),    done: !!(rd?.firstName) },
+    { id: 'vehicle',    title: t('vehicle_details'),   desc: t('vehicle_desc'),        done: hasVehicle },
+    { id: 'kyc',        title: t('kyc_documents'),     desc: t('kyc_desc'),            done: kycStatus === 'APPROVED' },
+    { id: 'onboarding', title: t('onboarding_app'),    desc: t('onboarding_desc'),     done: obStatus === 'APPROVED' },
   ];
 
   const currentStep = steps.findIndex(s => !s.done);
 
   const kycBadge = {
-    APPROVED: <span className="badge green">✓ Verified</span>,
-    PENDING: <span className="badge orange">⏳ Under Review</span>,
-    REJECTED: <span className="badge red">✗ Rejected</span>,
-    NOT_SUBMITTED: <span className="badge neutral">Not Submitted</span>,
+    APPROVED:      <span className="badge green">{t('verified')}</span>,
+    PENDING:       <span className="badge orange">{t('pending_review')}</span>,
+    REJECTED:      <span className="badge red">{t('rejected')}</span>,
+    NOT_SUBMITTED: <span className="badge neutral">{t('not_submitted')}</span>,
   }[kycStatus] || <span className="badge neutral">{kycStatus}</span>;
 
   const obBadge = {
-    APPROVED: <span className="badge green">✓ Approved</span>,
-    PENDING: <span className="badge orange">⏳ Pending Review</span>,
-    REJECTED: <span className="badge red">✗ Rejected</span>,
-    NOT_SUBMITTED: <span className="badge neutral">Not Submitted</span>,
+    APPROVED:      <span className="badge green">{t('approved')}</span>,
+    PENDING:       <span className="badge orange">{t('pending_review')}</span>,
+    REJECTED:      <span className="badge red">{t('rejected')}</span>,
+    NOT_SUBMITTED: <span className="badge neutral">{t('not_submitted')}</span>,
   }[obStatus] || <span className="badge neutral">{obStatus}</span>;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-16">
         <div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>Profile</div>
-          <div style={{ fontSize: 12, color: 'var(--text-2)' }}>Manage your rider account</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>{t('profile')}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{t('manage_account')}</div>
         </div>
         <button className="btn btn-ghost btn-sm" onClick={fetchRider} style={{ padding: 8 }}>
           <RefreshCw size={15} />
@@ -388,24 +394,24 @@ export default function ProfilePage() {
           </button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
-            <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>KYC Status</div>
+            <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>{t('kyc_status')}</div>
             {kycBadge}
           </div>
           <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
-            <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>Onboarding</div>
+            <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>{t('onboarding')}</div>
             {obBadge}
           </div>
           {rd?.vehicleType && (
             <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
-              <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>Vehicle</div>
+              <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>{t('vehicle')}</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>{rd.vehicleType}</div>
             </div>
           )}
           {rd?.vehicleNumber && (
             <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
-              <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>Reg. Number</div>
+              <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>{t('reg_number')}</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', fontFamily: 'var(--font-mono)' }}>{rd.vehicleNumber}</div>
             </div>
           )}
@@ -416,7 +422,7 @@ export default function ProfilePage() {
       {obStatus !== 'APPROVED' && (
         <div className="card mb-12">
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, marginBottom: 16 }}>
-            🚀 Complete Setup
+            {t('complete_setup')}
           </div>
           <StepIndicator steps={steps} current={currentStep === -1 ? steps.length : currentStep} />
 
@@ -425,34 +431,34 @@ export default function ProfilePage() {
           <div className="flex flex-col gap-8">
             {!rd?.firstName && (
               <button className="btn btn-secondary" onClick={() => setModal('profile')}>
-                <User size={14} /> Complete Profile
+                <User size={14} /> {t('complete_profile')}
               </button>
             )}
             {rd?.firstName && !hasVehicle && (
               <button className="btn btn-secondary" onClick={() => setModal('vehicle')}>
-                <Car size={14} /> Add Vehicle Details
+                <Car size={14} /> {t('add_vehicle')}
               </button>
             )}
             {hasVehicle && kycStatus === 'NOT_SUBMITTED' && (
               <button className="btn btn-secondary" onClick={() => setModal('kyc')}>
-                <FileText size={14} /> Submit KYC
+                <FileText size={14} /> {t('submit_kyc')}
               </button>
             )}
             {kycStatus === 'APPROVED' && obStatus === 'NOT_SUBMITTED' && (
               <button className="btn btn-primary" onClick={submitOnboarding}>
-                <Send size={14} /> Submit Onboarding Application
+                <Send size={14} /> {t('submit_onboarding')}
               </button>
             )}
             {obStatus === 'PENDING' && (
               <div style={{ padding: '12px', background: 'var(--orange-dim)', borderRadius: 8, fontSize: 13, color: 'var(--orange)' }}>
-                ⏳ Your application is under review. We'll notify you once approved.
+                {t('under_review')}
               </div>
             )}
             {obStatus === 'REJECTED' && (
               <div style={{ padding: '12px', background: 'var(--red-dim)', borderRadius: 8, fontSize: 13, color: 'var(--red)' }}>
-                ✗ Application rejected. Please update your details and resubmit.
+                {t('rejected_msg')}
                 <button className="btn btn-danger btn-sm" style={{ marginTop: 10, width: '100%' }} onClick={submitOnboarding}>
-                  Resubmit Application
+                  {t('resubmit')}
                 </button>
               </div>
             )}
@@ -465,8 +471,8 @@ export default function ProfilePage() {
           <div className="flex items-center gap-10">
             <CheckCircle size={20} style={{ color: 'var(--green)', flexShrink: 0 }} />
             <div>
-              <div style={{ fontWeight: 600, color: 'var(--green)' }}>Fully Onboarded!</div>
-              <div style={{ fontSize: 12, color: 'var(--text-1)' }}>You're approved to accept and deliver orders.</div>
+              <div style={{ fontWeight: 600, color: 'var(--green)' }}>{t('fully_onboarded')}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-1)' }}>{t('approved_msg')}</div>
             </div>
           </div>
         </div>
@@ -477,7 +483,7 @@ export default function ProfilePage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Banknote size={16} style={{ color: 'var(--accent)' }} />
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700 }}>Payout Account</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700 }}>{t('payout_account')}</div>
           </div>
           <button className="btn btn-ghost btn-sm" onClick={() => setModal('bank')} style={{ padding: 8 }}>
             <Edit2 size={14} />
@@ -496,13 +502,13 @@ export default function ProfilePage() {
               <>
                 {rd?.bankAccountHolderName && (
                   <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
-                    <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>Account Holder</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>{t('account_holder').replace(' *','')}</div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>{rd.bankAccountHolderName}</div>
                   </div>
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
-                    <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>Account No.</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>{t('account_no')}</div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', fontFamily: 'var(--font-mono)' }}>
                       ••••{rd.bankAccountNumber.slice(-4)}
                     </div>
@@ -516,7 +522,7 @@ export default function ProfilePage() {
                 </div>
                 {rd?.bankName && (
                   <div style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8 }}>
-                    <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>Bank</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginBottom: 4, textTransform: 'uppercase' }}>{t('bank_name')}</div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>{rd.bankName}</div>
                   </div>
                 )}
@@ -526,18 +532,113 @@ export default function ProfilePage() {
         ) : (
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
             <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12 }}>
-              No payout account added yet
+              {t('no_payout_added')}
             </div>
             <button className="btn btn-primary btn-sm" onClick={() => setModal('bank')}>
-              <Banknote size={13} /> Add Payout Account
+              <Banknote size={13} /> {t('add_payout')}
             </button>
           </div>
         )}
       </div>
 
+      {/* ── Settings Card ─────────────────────────────────────────────────── */}
+      <div className="card mb-12">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+          <div style={{
+            width: 30, height: 30, borderRadius: 'var(--r-sm)',
+            background: 'var(--accent-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {isDark ? <Moon size={15} style={{ color: 'var(--accent)' }} /> : <Sun size={15} style={{ color: 'var(--accent)' }} />}
+          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700 }}>{t('settings')}</div>
+        </div>
+
+        {/* Theme toggle row */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 0', borderBottom: '1px solid var(--border)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {isDark
+              ? <Moon size={16} style={{ color: 'var(--text-2)' }} />
+              : <Sun size={16} style={{ color: 'var(--text-2)' }} />}
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)' }}>{t('theme')}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)' }}>{isDark ? t('dark_mode') : t('light_mode')}</div>
+            </div>
+          </div>
+          {/* Theme pill buttons */}
+          <div style={{
+            display: 'flex', background: 'var(--bg-2)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r-sm)', padding: 3, gap: 3,
+          }}>
+            {[
+              { key: 'dark',  icon: <Moon size={13} />,  label: t('dark_mode').split(' ')[0] },
+              { key: 'light', icon: <Sun size={13} />,   label: t('light_mode').split(' ')[0] },
+            ].map(({ key, icon, label }) => (
+              <button key={key}
+                onClick={() => { if (theme !== key) toggleTheme(); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  background: theme === key ? 'var(--accent)' : 'transparent',
+                  border: 'none', borderRadius: 6,
+                  padding: '6px 10px',
+                  color: theme === key ? '#fff' : 'var(--text-2)',
+                  fontSize: 12, fontWeight: theme === key ? 700 : 500,
+                  cursor: 'pointer', transition: 'all 0.18s ease',
+                  fontFamily: 'var(--font-sans)',
+                }}
+              >
+                {icon} {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Language toggle row */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 0',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Languages size={16} style={{ color: 'var(--text-2)' }} />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)' }}>{t('language')}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)' }}>{lang === 'en' ? 'English' : 'हिंदी'}</div>
+            </div>
+          </div>
+          {/* Language pill buttons */}
+          <div style={{
+            display: 'flex', background: 'var(--bg-2)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r-sm)', padding: 3, gap: 3,
+          }}>
+            {[
+              { key: 'en', label: 'EN' },
+              { key: 'hi', label: 'हि' },
+            ].map(({ key, label }) => (
+              <button key={key}
+                onClick={() => setLang(key)}
+                style={{
+                  background: lang === key ? 'var(--accent)' : 'transparent',
+                  border: 'none', borderRadius: 6,
+                  padding: '6px 14px',
+                  color: lang === key ? '#fff' : 'var(--text-2)',
+                  fontSize: 13, fontWeight: lang === key ? 700 : 500,
+                  cursor: 'pointer', transition: 'all 0.18s ease',
+                  fontFamily: 'var(--font-sans)',
+                  minWidth: 44,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* Sign out */}
       <button className="btn btn-danger" style={{ width: '100%', marginTop: 4 }} onClick={logout}>
-        Sign Out
+        {t('sign_out')}
       </button>
 
       {/* Modals */}

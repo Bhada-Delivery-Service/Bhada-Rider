@@ -1,6 +1,36 @@
 import axios from 'axios';
+import { logger } from '../utils/logger';
 
+const log = logger('API');
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+
+// ─── Client-side rate limiter for sensitive mutation endpoints ──────────────
+// Prevents rapid double-taps from firing duplicate requests even if the
+// useActionGuard hook is bypassed (e.g. programmatic calls).
+const rateLimitMap = new Map(); // key → timestamp of last call
+const RATE_LIMIT_WINDOWS = {
+  accept:         3000,  // 3s between accepts
+  deliver:        3000,
+  handover:       3000,
+  cancelDelivery: 5000,
+  goOnline:       2000,
+  goOffline:      2000,
+  takeBreak:      2000,
+  resume:         2000,
+};
+
+function checkRateLimit(actionKey) {
+  const window = RATE_LIMIT_WINDOWS[actionKey];
+  if (!window) return; // not rate-limited
+  const last = rateLimitMap.get(actionKey);
+  const now  = Date.now();
+  if (last && now - last < window) {
+    const remaining = Math.ceil((window - (now - last)) / 1000);
+    throw new Error(`Action "${actionKey}" rate limited. Wait ${remaining}s.`);
+  }
+  rateLimitMap.set(actionKey, now);
+}
+
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -53,10 +83,10 @@ export const ridersAPI = {
   revokeOnboarding:  (id)          => api.delete(`/riders/${id}/onboarding`),
   updateOnboarding:  (id, data)    => api.put(`/riders/${id}/onboarding`, data),
   getOnboardingStatus:(id)         => api.get(`/riders/${id}/onboarding/status`),
-  goOnline:          (id)          => api.put(`/riders/${id}/online`),
-  goOffline:         (id)          => api.put(`/riders/${id}/offline`),
-  takeBreak:         (id)          => api.put(`/riders/${id}/break`),
-  resume:            (id)          => api.put(`/riders/${id}/resume`),
+  goOnline:          (id)          => { checkRateLimit('goOnline');  log.action('rider_go_online',  { id }); return api.put(`/riders/${id}/online`); },
+  goOffline:         (id)          => { checkRateLimit('goOffline'); log.action('rider_go_offline', { id }); return api.put(`/riders/${id}/offline`); },
+  takeBreak:         (id)          => { checkRateLimit('takeBreak'); log.action('rider_take_break', { id }); return api.put(`/riders/${id}/break`); },
+  resume:            (id)          => { checkRateLimit('resume');    log.action('rider_resume',     { id }); return api.put(`/riders/${id}/resume`); },
   getRoutes:         (id)          => api.get(`/riders/${id}/routes`),
   addRoute:          (id, data)    => api.post(`/riders/${id}/routes`, data),
   updateRoute:       (id, rid, data) => api.put(`/riders/${id}/routes/${rid}`, data),
@@ -76,10 +106,10 @@ export const ordersAPI = {
   getAvailable:   ()               => api.get('/orders/available'),
   getMyOrders:    ()               => api.get('/orders/my-rider-orders'),
   getById:        (id)             => api.get(`/orders/${id}`),
-  accept:         (id)             => api.put(`/orders/${id}/accept`),
-  cancelDelivery: (id, reason)     => api.put(`/orders/${id}/cancel-delivery`, { reason }),
-  handover:       (id, pickupOtp)  => api.post(`/orders/${id}/handover`, { pickupOtp }),
-  deliver:        (id, dropOtp)    => api.post(`/orders/${id}/deliver`, { dropOtp }),
+  accept:         (id)             => { checkRateLimit('accept');         log.action('order_accept',   { id }); return api.put(`/orders/${id}/accept`); },
+  cancelDelivery: (id, reason)     => { checkRateLimit('cancelDelivery'); log.action('order_cancel',   { id }); return api.put(`/orders/${id}/cancel-delivery`, { reason }); },
+  handover:       (id, pickupOtp)  => { checkRateLimit('handover'); log.action('order_handover', { id }); return api.post(`/orders/${id}/handover`, { pickupOtp }); },
+  deliver:        (id, dropOtp)    => { checkRateLimit('deliver');  log.action('order_deliver',  { id }); return api.post(`/orders/${id}/deliver`, { dropOtp }); },
 };
 
 // ─── File Upload ───────────────────────────────────────────────────────────

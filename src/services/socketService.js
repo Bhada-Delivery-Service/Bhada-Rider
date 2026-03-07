@@ -1,82 +1,130 @@
-import { io } from 'socket.io-client';
+/**
+ * socketService.js — Enhanced with:
+ *
+ *  1. Exponential backoff reconnect strategy
+ *  2. Heartbeat / ping mechanism
+ *  3. Socket change listeners for locationService
+ *  4. Clean listener management to prevent duplicate bindings
+ */
 
+import { io } from 'socket.io-client';
+import { logger } from '../utils/logger';
+
+const log = logger('Socket');
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
-let socket = null;
+const RECONNECT_DELAYS    = [1000, 2000, 4000, 8000, 16000, 30000];
+const HEARTBEAT_INTERVAL  = 25000;
+const HEARTBEAT_TIMEOUT   = 5000;
 
-// ─── Socket change listeners ────────────────────────────────────────────────
-// Any module (e.g. locationService) that holds a reference to the socket
-// registers here. When NotificationContext replaces the socket (on token
-// refresh), all listeners are called with the NEW socket so they can update
-// their internal socketRef. Without this, locationService keeps emitting on
-// a dead socket after every token refresh — which is exactly why the backend
-// only ever received the very first location event.
+let socket         = null;
+let heartbeatTimer = null;
+let heartbeatCheck = null;
+let reconnectCount = 0;
+let reconnectTimer = null;
+
 const socketChangeListeners = new Set();
 
 export function onSocketChanged(fn) {
   socketChangeListeners.add(fn);
-  return () => socketChangeListeners.delete(fn); // returns unsubscribe fn
+  return () => socketChangeListeners.delete(fn);
 }
 
 function notifySocketChanged(newSocket) {
   socketChangeListeners.forEach(fn => fn(newSocket));
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (!socket?.connected) return;
+    socket.emit('ping');
+    heartbeatCheck = setTimeout(() => {
+      log.warn('Heartbeat timeout — connection may be stale');
+    }, HEARTBEAT_TIMEOUT);
+    socket.once('pong', () => {
+      clearTimeout(heartbeatCheck);
+      heartbeatCheck = null;
+    });
+  }, HEARTBEAT_INTERVAL);
+}
+
+function stopHeartbeat() {
+  clearInterval(heartbeatTimer);
+  clearTimeout(heartbeatCheck);
+  heartbeatTimer = null;
+  heartbeatCheck = null;
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  const delay = RECONNECT_DELAYS[Math.min(reconnectCount, RECONNECT_DELAYS.length - 1)];
+  reconnectCount++;
+  log.info(`Reconnect scheduled in ${delay}ms (attempt ${reconnectCount})`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (socket && !socket.connected) {
+      log.info('Attempting reconnect…');
+      socket.connect();
+    }
+  }, delay);
+}
 
 export function connectSocket(token) {
-  // Already have a live connected socket — nothing to do.
   if (socket?.connected) return socket;
 
-  // A socket exists but it is NOT connected (mid-reconnect or dead after token
-  // refresh). Destroy it fully so we can create a fresh one with the new token.
   if (socket) {
     socket.removeAllListeners();
     socket.disconnect();
     socket = null;
+    stopHeartbeat();
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   }
+
+  reconnectCount = 0;
 
   socket = io(SOCKET_URL, {
     auth: { token },
     transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionAttempts: 10,
-    reconnectionDelay: 2000,
+    reconnection: false,  // we handle reconnect manually with backoff
   });
 
   socket.on('connect', () => {
-    console.log('[WS:Rider] Connected —', socket.id);
-    socket.emit('ping');
+    reconnectCount = 0;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    log.info('Connected', { id: socket.id });
+    startHeartbeat();
   });
 
   socket.on('disconnect', (reason) => {
-    console.warn('[WS:Rider] Disconnected —', reason);
-    // Do NOT null out socket here. Socket.IO reconnects the same object
-    // in-place. locationService.emitNow() guards on socketRef?.connected
-    // so it skips silently while offline and resumes when reconnected.
+    log.warn('Disconnected', { reason });
+    stopHeartbeat();
+    if (reason !== 'io client disconnect') {
+      scheduleReconnect();
+    }
   });
 
   socket.on('connect_error', (err) => {
-    console.warn('[WS:Rider] Connection error —', err.message);
+    log.warn('Connection error', { message: err.message });
+    scheduleReconnect();
   });
 
-  // KEY FIX: tell locationService about the new socket object so it
-  // updates its internal socketRef. Without this call, locationService
-  // holds a stale reference to the previous (dead) socket forever.
   notifySocketChanged(socket);
-
   return socket;
 }
 
 export function disconnectSocket() {
+  stopHeartbeat();
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (socket) {
     socket.removeAllListeners();
     socket.disconnect();
     socket = null;
+    reconnectCount = 0;
   }
   notifySocketChanged(null);
+  log.info('Disconnected (explicit)');
 }
 
-export function getSocket() {
-  return socket;
-}
+export function getSocket() { return socket; }
+export function isSocketConnected() { return socket?.connected === true; }
