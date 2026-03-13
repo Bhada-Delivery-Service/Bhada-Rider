@@ -32,6 +32,7 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
   const [drawerOpen,    setDrawerOpen]      = useState(false);
   const [alertOrder,    setAlertOrder]      = useState(null); // triggers NewOrderAlert
   const socketRef = useRef(null);
+  const acceptedOrderIds = useRef(new Set()); // orders this rider already accepted — never re-alert these
   // Keep a ref to onOnboardingApproved so the socket handler always calls the
   // latest version without needing it as an effect dependency.
   const onOnboardingApprovedRef = useRef(onOnboardingApproved);
@@ -80,16 +81,20 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
       if (n.type === 'ORDER_AVAILABLE') {
         ordersAPI.getAvailable()
           .then(({ data }) => {
-            // data may be an array directly or wrapped in data.data / data.orders
             const list = Array.isArray(data) ? data
               : Array.isArray(data?.data) ? data.data
               : Array.isArray(data?.orders) ? data.orders
               : [];
-            const order = list[0] || null;
-            setAlertOrder(order || n); // fallback to bare notification if fetch fails
+            // Never re-alert for an order this rider already accepted
+            const order = list.find(o => {
+              const oid = String(o?.orderId || o?.id || '');
+              return oid && !acceptedOrderIds.current.has(oid);
+            }) || null;
+            if (order) setAlertOrder(order);
           })
           .catch(() => {
-            setAlertOrder(n); // fallback — alert still shows even without details
+            const nid = String(n?.data?.orderId || n?.orderId || '');
+            if (!nid || !acceptedOrderIds.current.has(nid)) setAlertOrder(n);
           });
         return; // skip the generic toast — the alert modal replaces it
       }
@@ -118,10 +123,9 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
     // pages (OrdersPage, OrderDetailPage, DashboardPage) can subscribe without
     // prop drilling. The backend emits these events to the rider's socket room.
     socket.on('order:updated', (data) => {
-      // New PLACED order → trigger the ring alert for the rider
-      if (data?.status === 'PLACED') {
-        setAlertOrder(data);
-      }
+      // NOTE: We deliberately do NOT set alertOrder here.
+      // The alert fires only from ORDER_AVAILABLE notifications (sent by the
+      // backend when a new order is placed). order:updated is for UI sync only.
       window.dispatchEvent(new CustomEvent('ws:order:updated', { detail: data }));
     });
 
@@ -187,11 +191,18 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const dismissAlert = useCallback(() => setAlertOrder(null), []);
 
+  // Call when rider accepts an order — clears the alert and prevents it
+  // from re-appearing for the same order via any subsequent socket events
+  const markOrderAccepted = useCallback((orderId) => {
+    if (orderId) acceptedOrderIds.current.add(String(orderId));
+    setAlertOrder(null);
+  }, []);
+
   return (
     <NotificationContext.Provider value={{
       notifications, unseenCount, loading, drawerOpen,
       fetchNotifications, markSeen, markAllSeen, openDrawer, closeDrawer,
-      alertOrder, dismissAlert,
+      alertOrder, dismissAlert, markOrderAccepted,
     }}>
       {children}
     </NotificationContext.Provider>

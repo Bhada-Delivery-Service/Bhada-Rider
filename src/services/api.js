@@ -99,6 +99,9 @@ export const ridersAPI = {
   completeDelivery:  (id)          => api.put(`/riders/${id}/delivery/complete`),
   // Save bank account / UPI details via onboarding update
   updateBankAccount: (id, data)    => api.put(`/riders/${id}/onboarding`, data),
+  // FCM push token — call after login (Android), clear on logout
+  saveFcmToken:      (id, token)   => api.put(`/riders/${id}/fcm-token`, { fcmToken: token }),
+  clearFcmToken:     (id)          => api.delete(`/riders/${id}/fcm-token`),
 };
 
 // ─── Orders ────────────────────────────────────────────────────────────────

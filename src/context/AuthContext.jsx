@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { authAPI, ridersAPI } from '../services/api';
+import { initPushNotifications, clearPushToken } from '../services/pushService';
 
 const AuthContext = createContext(null);
 
@@ -8,12 +10,12 @@ export function AuthProvider({ children }) {
   const [rider, setRider] = useState(null);
   const [onboardingStatus, setOnboardingStatus] = useState(null);
   const [loading, setLoading] = useState(true);
-  // accessToken as React state — critical so NotificationProvider gets a stable
-  // reference that only changes on actual login/logout, not on every render.
-  // Reading directly from localStorage in App.jsx caused a new string reference
-  // on every render → NotificationContext useEffect([accessToken]) re-ran →
-  // disconnectSocket() called in a loop → socket connect/disconnect spam.
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem('accessToken'));
+
+  // navigate ref — AuthProvider is inside BrowserRouter so this always works
+  const navigate    = useNavigate();
+  const navigateRef = React.useRef(navigate);
+  React.useEffect(() => { navigateRef.current = navigate; }, [navigate]);
 
   // Fetch fresh rider data and onboarding status from server
   const fetchRiderStatus = async (uid) => {
@@ -77,6 +79,11 @@ export function AuthProvider({ children }) {
     setAccessToken(newAccessToken);  // ← update React state
     setUser(userData);
     await fetchRiderStatus(userData.uid);
+
+    // Initialize push notifications on Android after login
+    initPushNotifications(userData.uid, (orderId) => {
+      navigateRef.current?.(`/orders/${orderId}`);
+    });
   };
 
   // useCallback gives updateRider a stable reference so hooks that list it
@@ -92,6 +99,14 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    // Clear FCM token from backend so rider doesn't get pushes after logout
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const u = JSON.parse(storedUser);
+        clearPushToken(u.uid);
+      } catch { /* ignore */ }
+    }
     localStorage.clear();
     setUser(null);
     setRider(null);

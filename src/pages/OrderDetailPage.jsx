@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ordersAPI } from '../services/api';
+// import { useNotifications } from '../context/NotificationContext';
+import { useNotifications } from '../context/NotificationContext';
 import { useActionGuard } from '../hooks/useActionGuard';
 import { logger } from '../utils/logger';
 import StatusStepper from '../components/ui/StatusStepper';
@@ -159,7 +161,10 @@ export default function OrderDetailPage() {
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const { guard, anyLoading: actionLoading } = useActionGuard();
+  const { markOrderAccepted } = useNotifications();
 
+
+  // Initial load — shows skeleton on first open
   const fetchOrder = async () => {
     setLoading(true);
     try {
@@ -168,6 +173,14 @@ export default function OrderDetailPage() {
     } catch {
       toast.error('Failed to load order');
     } finally { setLoading(false); }
+  };
+
+  // Silent refresh after actions — updates state without showing skeleton
+  const refreshOrder = async () => {
+    try {
+      const { data } = await ordersAPI.getById(id);
+      setOrder(data?.data || data);
+    } catch { /* silent — optimistic update already applied */ }
   };
 
   useEffect(() => { fetchOrder(); }, [id]);
@@ -188,8 +201,14 @@ export default function OrderDetailPage() {
     guard(async () => {
       log.action(`order_${action}`, { orderId: id, action });
       if (action === 'accept') {
-        await ordersAPI.accept(id);
-        toast.success('Order accepted! 🎉');
+        const { data: res } = await ordersAPI.accept(id);
+        // Immediately apply the response — backend returns updated order with
+        // new status (READY if sender already marked ready, else PLACED with
+        // assignedRiderId set) AND the pickupOtp for the rider
+        const updated = res?.data || res;
+        if (updated) setOrder(updated);
+        markOrderAccepted(id); // clear alert + block re-trigger
+        toast.success(res?.message || 'Order accepted! 🎉');
       } else if (action === 'deliver') {
         await ordersAPI.deliver(id, extra);
         toast.success('Delivered! Great work 🚀');
@@ -199,7 +218,8 @@ export default function OrderDetailPage() {
         toast.success('Delivery cancelled');
         setShowCancel(false);
       }
-      fetchOrder();
+      // Silent background refresh to confirm server state (no skeleton flash)
+      await refreshOrder();
     }, action).catch(err => {
       toast.error(err.response?.data?.message || err.message || 'Action failed');
       log.error(`order_${action} failed`, err);
@@ -470,13 +490,24 @@ export default function OrderDetailPage() {
       {/* ── Sticky action bar ── */}
       {!showDeliver && !showCancel && (
         <div className="sticky-action-bar">
-          {status === 'PLACED' && (
+          {status === 'PLACED' && !order?.assignedRiderId && (
             <>
               <button className="btn btn-primary" style={{ flex: 1 }} disabled={actionLoading} onClick={() => handleAction('accept')}>
                 <Truck size={15} /> Accept Order
               </button>
               <button className="btn btn-danger btn-sm" onClick={() => setShowCancel(true)}><X size={15} /></button>
             </>
+          )}
+          {status === 'PLACED' && order?.assignedRiderId && (
+            // Rider accepted — waiting for sender to mark package ready
+            <div style={{
+              flex: 1, textAlign: 'center',
+              padding: '12px 0',
+              color: 'rgba(255,255,255,0.5)',
+              fontSize: 13, fontWeight: 500,
+            }}>
+              ⏳ Waiting for sender to mark package ready…
+            </div>
           )}
           {status === 'READY' && (
             <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => setShowCancel(true)}>

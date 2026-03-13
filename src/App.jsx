@@ -108,8 +108,8 @@ export default function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <LangProvider>
-          <AuthProvider>
-            <BrowserRouter>
+          <BrowserRouter>
+            <AuthProvider>
               <Toaster
                 position="top-center"
                 toastOptions={{
@@ -126,8 +126,8 @@ export default function App() {
                 }}
               />
               <AppWithNotifications />
-            </BrowserRouter>
-          </AuthProvider>
+            </AuthProvider>
+          </BrowserRouter>
         </LangProvider>
       </ThemeProvider>
     </ErrorBoundary>
