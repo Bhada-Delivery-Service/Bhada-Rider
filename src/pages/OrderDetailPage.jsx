@@ -3,10 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Package, MapPin, Navigation, CheckCircle,
   Truck, KeyRound, X, Images, ChevronLeft, ChevronRight,
-  Phone, Hash, RefreshCw,
+  Phone, Hash, RefreshCw, QrCode, Banknote, Clock,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { ordersAPI } from '../services/api';
+import { ordersAPI, codPaymentsAPI } from '../services/api';
 // import { useNotifications } from '../context/NotificationContext';
 import { useNotifications } from '../context/NotificationContext';
 import { useActionGuard } from '../hooks/useActionGuard';
@@ -150,6 +150,194 @@ function ImageGallery({ images, itemName }) {
   );
 }
 
+/* ─── Pickup Countdown Timer ─────────────────────────────────────────────── */
+const PICKUP_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+// Inject pulse animation once
+const PULSE_STYLE_ID = 'timer-pulse-style';
+if (!document.getElementById(PULSE_STYLE_ID)) {
+  const s = document.createElement('style');
+  s.id = PULSE_STYLE_ID;
+  s.textContent = `@keyframes timerPulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,71,87,0.6)} 50%{box-shadow:0 0 0 6px rgba(255,71,87,0)} }`;
+  document.head.appendChild(s);
+}
+
+function PickupCountdownTimer({ order }) {
+  const [timeLeft, setTimeLeft] = useState(null);
+
+  // Timer starts ONLY when sender marks order READY — use readyAt > statusUpdatedAt > updatedAt
+  const startTime = order.readyAt || order.statusUpdatedAt || (order.status === 'READY' ? order.updatedAt : null);
+
+  useEffect(() => {
+    if (!startTime) return;
+
+    const calc = () => {
+      const elapsed = Date.now() - new Date(startTime).getTime();
+      const remaining = PICKUP_WINDOW_MS - elapsed;
+      setTimeLeft(remaining);
+    };
+
+    calc();
+    const interval = setInterval(calc, 1000);
+    return () => clearInterval(interval);
+  }, [startTime]);
+
+  // Only show when order is READY (sender has marked it ready, rider hasn't picked up yet)
+  if (order.status !== 'READY') return null;
+  if (!startTime) return null;
+  if (timeLeft === null) return null;
+
+  const expired  = timeLeft <= 0;
+  const critical = !expired && timeLeft < 15 * 60 * 1000;  // < 15 min → red
+  const warning  = !expired && !critical && timeLeft < 30 * 60 * 1000; // < 30 min → orange
+
+  const totalSecs  = Math.max(0, Math.floor(timeLeft / 1000));
+  const hrs        = Math.floor(totalSecs / 3600);
+  const mins       = Math.floor((totalSecs % 3600) / 60);
+  const secs       = totalSecs % 60;
+  const pad        = n => String(n).padStart(2, '0');
+
+  const pct        = Math.max(0, Math.min(100, (timeLeft / PICKUP_WINDOW_MS) * 100));
+
+  const color  = expired  ? '#FF4757'
+               : critical ? '#FF4757'
+               : warning  ? '#FF8C42'
+               :             '#00e5a0';
+
+  const bgColor = expired  ? 'rgba(255,71,87,0.08)'
+                : critical ? 'rgba(255,71,87,0.08)'
+                : warning  ? 'rgba(255,140,66,0.08)'
+                :             'rgba(0,229,160,0.06)';
+
+  const borderColor = expired  ? 'rgba(255,71,87,0.35)'
+                    : critical ? 'rgba(255,71,87,0.35)'
+                    : warning  ? 'rgba(255,140,66,0.35)'
+                    :             'rgba(0,229,160,0.2)';
+
+  // SVG ring
+  const R    = 28;
+  const CIRC = 2 * Math.PI * R;
+  const dash = (pct / 100) * CIRC;
+
+  return (
+    <div style={{
+      marginBottom: 16,
+      background: bgColor,
+      border: `1px solid ${borderColor}`,
+      borderRadius: 16,
+      padding: '16px 18px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 16,
+    }}>
+      {/* Ring progress */}
+      <div style={{ position: 'relative', flexShrink: 0, width: 68, height: 68 }}>
+        <svg width="68" height="68" viewBox="0 0 68 68" style={{ transform: 'rotate(-90deg)' }}>
+          {/* Track */}
+          <circle cx="34" cy="34" r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="5" />
+          {/* Progress */}
+          <circle
+            cx="34" cy="34" r={R}
+            fill="none"
+            stroke={color}
+            strokeWidth="5"
+            strokeLinecap="round"
+            strokeDasharray={`${dash} ${CIRC}`}
+            style={{ transition: 'stroke-dasharray 1s linear, stroke 0.4s ease' }}
+          />
+        </svg>
+        {/* Icon in centre */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Clock size={18} style={{ color, transition: 'color 0.4s ease' }} />
+        </div>
+        {/* Pulse dot when critical */}
+        {(critical || expired) && (
+          <div style={{
+            position: 'absolute', top: 4, right: 4,
+            width: 10, height: 10, borderRadius: '50%',
+            background: '#FF4757',
+            boxShadow: '0 0 0 0 rgba(255,71,87,0.6)',
+            animation: 'timerPulse 1.2s ease-in-out infinite',
+          }} />
+        )}
+      </div>
+
+      {/* Text content */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 10, fontFamily: 'var(--font-mono)',
+          color: color, letterSpacing: '0.08em',
+          fontWeight: 700, marginBottom: 6,
+          transition: 'color 0.4s ease',
+        }}>
+          {expired ? '⚠️ PICKUP WINDOW EXPIRED' : '⏱ TIME LEFT FOR PICKUP'}
+        </div>
+
+        {expired ? (
+          <div style={{ fontSize: 13, color: '#FF4757', fontWeight: 600, lineHeight: 1.4 }}>
+            Your assignment may be revoked.<br />
+            <span style={{ fontSize: 11, color: 'rgba(255,71,87,0.7)', fontWeight: 400 }}>
+              Contact support if this was delayed.
+            </span>
+          </div>
+        ) : (
+          <>
+            {/* Digital clock */}
+            <div style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 28, fontWeight: 800,
+              letterSpacing: '0.05em',
+              color: color,
+              lineHeight: 1,
+              marginBottom: 6,
+              transition: 'color 0.4s ease',
+            }}>
+              {hrs > 0 && <>{pad(hrs)}:</>}{pad(mins)}:{pad(secs)}
+            </div>
+
+            {/* Progress bar */}
+            <div style={{
+              height: 4, borderRadius: 2,
+              background: 'rgba(255,255,255,0.08)',
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                height: '100%',
+                width: `${pct}%`,
+                background: color,
+                borderRadius: 2,
+                transition: 'width 1s linear, background 0.4s ease',
+              }} />
+            </div>
+
+            {warning && (
+              <div style={{
+                fontSize: 10, color: '#FF8C42',
+                fontFamily: 'var(--font-mono)',
+                marginTop: 5,
+              }}>
+                ⚠️ Pick up soon to avoid revocation
+              </div>
+            )}
+            {critical && !expired && (
+              <div style={{
+                fontSize: 10, color: '#FF4757',
+                fontFamily: 'var(--font-mono)',
+                marginTop: 5, fontWeight: 700,
+              }}>
+                🚨 Head to pickup immediately!
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main Page ───────────────────────────────────────────────────────────── */
 export default function OrderDetailPage() {
   const { id } = useParams();
@@ -158,6 +346,10 @@ export default function OrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [showHandover, setShowHandover] = useState(false);
   const [showDeliver, setShowDeliver] = useState(false);
+  // COD payment state — rider shows QR to customer
+  const [codPayment, setCodPayment] = useState(null);
+  const [codLoading, setCodLoading] = useState(false);
+  const [showQr, setShowQr]         = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const { guard, anyLoading: actionLoading } = useActionGuard();
@@ -183,7 +375,35 @@ export default function OrderDetailPage() {
     } catch { /* silent — optimistic update already applied */ }
   };
 
+  // Fetch COD payment data (QR + status) when order is COD
+  const fetchCodPayment = async (orderData) => {
+    if (!orderData || orderData.billing?.paymentMode !== 'COD') return;
+    if (codPayment?.paymentStatus === 'PAID') return;
+    setCodLoading(true);
+    try {
+      const { data } = await ordersAPI.getPayment(id);
+      setCodPayment(data?.data || data);
+    } catch { /* silent */ }
+    finally { setCodLoading(false); }
+  };
+
   useEffect(() => { fetchOrder(); }, [id]);
+
+  // Load COD payment after order loads or status changes
+  useEffect(() => { if (order) fetchCodPayment(order); }, [order?.status]);
+
+  // Real-time: customer paid via QR/Pay Now
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.orderId !== id) return;
+      setCodPayment(prev => prev
+        ? { ...prev, paymentStatus: 'PAID', paymentAt: new Date().toISOString() }
+        : { paymentStatus: 'PAID', orderId: id });
+      toast.success('💰 Customer paid digitally! Payment confirmed.', { duration: 4000 });
+    };
+    window.addEventListener('ws:cod:payment_received', handler);
+    return () => window.removeEventListener('ws:cod:payment_received', handler);
+  }, [id]);
 
   // ── Real-time: update this order page when status changes elsewhere ───────
   // e.g. sender marks package ready (PLACED → READY), admin cancels, deliver completes
@@ -278,6 +498,9 @@ export default function OrderDetailPage() {
 
       {/* Status stepper */}
       <StatusStepper status={status} />
+
+      {/* Pickup countdown timer — visible when rider accepted but hasn't picked up yet */}
+      <PickupCountdownTimer order={order} />
 
       {/* Map */}
       {hasCoords && <OrderMap order={order} />}
@@ -424,11 +647,121 @@ export default function OrderDetailPage() {
         </div>
       )}
 
+      {/* ── COD Payment Card — Rider shows QR to customer ── */}
+      {order.billing?.paymentMode === 'COD' && !['CANCELLED'].includes(status) && (
+        <div className="card" style={{
+          marginBottom: 10,
+          borderColor: codPayment?.paymentStatus === 'PAID' ? 'rgba(22,163,74,0.4)' : 'rgba(245,158,11,0.35)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <Banknote size={16} style={{ color: codPayment?.paymentStatus === 'PAID' ? 'var(--green)' : 'var(--orange)' }} />
+            <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              color: codPayment?.paymentStatus === 'PAID' ? 'var(--green)' : 'var(--orange)' }}>
+              {codPayment?.paymentStatus === 'PAID' ? 'PAYMENT RECEIVED ✅' : 'COD — PAYMENT PENDING'}
+            </span>
+            {codLoading && <div className="loader" style={{ width: 12, height: 12, marginLeft: 'auto' }} />}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+            padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: 12 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-2)' }}>Amount</span>
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 22,
+              color: codPayment?.paymentStatus === 'PAID' ? 'var(--green)' : 'var(--text-0)' }}>
+              ₹{Number(codPayment?.amount || order.billing?.payableAmount || 0).toFixed(2)}
+            </span>
+          </div>
+
+          {codPayment?.paymentStatus === 'PAID' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px',
+              background: 'rgba(22,163,74,0.1)', borderRadius: 10, border: '1px solid rgba(22,163,74,0.25)' }}>
+              <span style={{ fontSize: 22 }}>💰</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>Customer paid digitally</div>
+                <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>
+                  {codPayment?.razorpayPaymentId ? `Ref: ${codPayment.razorpayPaymentId.slice(-8).toUpperCase()}` : ''}
+                  {codPayment?.paymentAt
+                    ? ` · ${new Date(codPayment.paymentAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}`
+                    : ''}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 12, lineHeight: 1.5 }}>
+                Show this QR to the customer. They can scan it with any UPI app to pay digitally.
+                Payment confirmation appears automatically.
+              </div>
+
+              <button
+                onClick={() => {
+                  setShowQr(v => !v);
+                  if (!codPayment && !codLoading) fetchCodPayment(order);
+                }}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  gap: 8, padding: '10px 0', borderRadius: 10,
+                  border: '1.5px dashed rgba(245,158,11,0.5)',
+                  background: showQr ? 'rgba(245,158,11,0.08)' : 'transparent',
+                  color: 'var(--orange)', fontSize: 13, fontWeight: 700,
+                  cursor: 'pointer', fontFamily: 'var(--font-mono)',
+                  marginBottom: showQr ? 14 : 0 }}
+              >
+                <QrCode size={15} />
+                {showQr ? 'Hide QR Code' : 'Show QR Code to Customer'}
+              </button>
+
+              {showQr && (
+                <div style={{ textAlign: 'center' }}>
+                  {codLoading ? (
+                    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                      <div className="loader" />
+                      <span style={{ fontSize: 12, color: 'var(--text-2)' }}>Loading QR…</span>
+                    </div>
+                  ) : codPayment?.qrCodeImageUrl ? (
+                    <>
+                      <div style={{ display: 'inline-block', padding: 12, background: '#fff',
+                        borderRadius: 14, border: '2px solid rgba(255,255,255,0.15)', marginBottom: 8 }}>
+                        <img src={codPayment.qrCodeImageUrl} alt="UPI QR"
+                          style={{ width: 200, height: 200, display: 'block' }} />
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
+                        PhonePe · GPay · Paytm · BHIM · Any UPI app
+                      </div>
+                      {codPayment.qrExpiresAt && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          gap: 4, marginTop: 6, fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
+                          <Clock size={10} />
+                          Valid till {new Date(codPayment.qrExpiresAt * 1000)
+                            .toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ padding: 16, fontSize: 12, color: 'var(--text-2)' }}>
+                      QR unavailable. Ask customer to pay cash.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12,
+                padding: '8px 12px', background: 'rgba(245,158,11,0.08)',
+                borderRadius: 8, fontSize: 11, color: 'var(--orange)', fontFamily: 'var(--font-mono)' }}>
+                <Clock size={11} />
+                Waiting for customer payment · Updates automatically
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Order Info */}
       <div className="card" style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', letterSpacing: '0.06em', marginBottom: 12 }}>ORDER INFO</div>
         {[
           { label: 'Payment',  value: order.billing?.paymentMode || order.paymentMode },
+          { label: 'Pay Status', value: order.billing?.paymentMode === 'COD'
+              ? (codPayment?.paymentStatus === 'PAID' ? '✅ Paid Digitally' : '⏳ Pending')
+              : null },
           { label: 'Amount',   value: order.billing?.payableAmount ? `₹${Number(order.billing.payableAmount).toFixed(2)}` : null },
           { label: 'Distance', value: order.billing?.totalDistance ? `${Number(order.billing.totalDistance).toFixed(1)} km` : null },
           { label: 'Self Handling', value: order.isSelfHandling ? 'Yes' : 'No' },

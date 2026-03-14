@@ -113,6 +113,17 @@ export const ordersAPI = {
   cancelDelivery: (id, reason)     => { checkRateLimit('cancelDelivery'); log.action('order_cancel',   { id }); return api.put(`/orders/${id}/cancel-delivery`, { reason }); },
   handover:       (id, pickupOtp)  => { checkRateLimit('handover'); log.action('order_handover', { id }); return api.post(`/orders/${id}/handover`, { pickupOtp }); },
   deliver:        (id, dropOtp)    => { checkRateLimit('deliver');  log.action('order_deliver',  { id }); return api.post(`/orders/${id}/deliver`, { dropOtp }); },
+
+  // COD: fetch payment record (QR image URL, status, amount) to show customer
+  getPayment:     (id)             => api.get(`/orders/${id}/payment`),
+};
+
+// ─── COD Payments ──────────────────────────────────────────────────────────
+export const codPaymentsAPI = {
+  // Get full COD payment record (razorpayOrderId, qrCodeImageUrl, paymentStatus, amount)
+  get:            (orderId)        => api.get(`/payments/cod/${orderId}`),
+  // (Re-)generate QR + Razorpay order if expired or missing
+  initiate:       (orderId)        => api.post('/payments/cod/initiate', { orderId }),
 };
 
 // ─── File Upload ───────────────────────────────────────────────────────────
