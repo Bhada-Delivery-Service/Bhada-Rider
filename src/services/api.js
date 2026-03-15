@@ -2,7 +2,7 @@ import axios from 'axios';
 import { logger } from '../utils/logger';
 
 const log = logger('API');
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
 
 // ─── Client-side rate limiter for sensitive mutation endpoints ──────────────
 // Prevents rapid double-taps from firing duplicate requests even if the

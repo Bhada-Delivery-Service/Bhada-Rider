@@ -11,7 +11,7 @@ import { io } from 'socket.io-client';
 import { logger } from '../utils/logger';
 
 const log = logger('Socket');
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:8080';
 
 const RECONNECT_DELAYS    = [1000, 2000, 4000, 8000, 16000, 30000];
 const HEARTBEAT_INTERVAL  = 25000;
