@@ -1540,7 +1540,7 @@ export default function OrderDetailPage() {
                 <Truck size={15} /> Accept Order
               </button>
             
-            </>
+            </> 
           )}
           {status === 'PLACED' && order?.assignedRiderId && (
             // Rider accepted — waiting for sender to mark package ready
