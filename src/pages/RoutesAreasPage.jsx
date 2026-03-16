@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   MapPin, Plus, Trash2, RefreshCw, X, Route, Navigation,
-  Circle, CheckCircle, Crosshair, ChevronRight, Eye, Layers,
+  Circle, CheckCircle, Crosshair, ChevronRight, Eye, Layers, Search,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ridersAPI, serviceAreaAPI } from '../services/api';
@@ -51,6 +51,76 @@ const DARK_STYLE = [
   { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#9ba8c4' }] },
 ];
 
+/* ─── Reusable Place Search Box ──────────────────────────────────────────── */
+/**
+ * Renders a search input that uses Google Places Autocomplete.
+ * When a place is selected, calls onPlace({ lat, lng, label }).
+ * `placeholder` – hint text shown inside the input.
+ * `accentColor`  – colour used for the search icon and suggestions highlight.
+ */
+function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentColor = '#00e5a0' }) {
+  const inputRef = useRef(null);
+  const autocompleteRef = useRef(null);
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    if (!window.google?.maps?.places || !inputRef.current) return;
+    if (autocompleteRef.current) return; // already initialised
+
+    autocompleteRef.current = new window.google.maps.places.Autocomplete(inputRef.current, {
+      componentRestrictions: { country: 'in' }, // restrict to India — remove if global needed
+      fields: ['geometry', 'name', 'formatted_address', 'address_components'],
+    });
+
+    autocompleteRef.current.addListener('place_changed', () => {
+      const place = autocompleteRef.current.getPlace();
+      if (!place.geometry?.location) return;
+
+      const lat = place.geometry.location.lat();
+      const lng = place.geometry.location.lng();
+
+      // Build a short human-readable label (sublocality → locality → name)
+      const comps = place.address_components || [];
+      const sub = comps.find(c => c.types.includes('sublocality_level_1') || c.types.includes('sublocality'));
+      const loc = comps.find(c => c.types.includes('locality'));
+      const label = sub?.long_name || loc?.long_name || place.name || place.formatted_address?.split(',')[0] || '';
+
+      setQuery(place.name || label);
+      onPlace({ lat, lng, label: label || place.name });
+    });
+
+    return () => {
+      // Cleanup: remove PAC dropdown injected by Google
+      const pacs = document.querySelectorAll('.pac-container');
+      pacs.forEach(el => el.remove());
+    };
+  }, [onPlace]);
+
+  return (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+      <Search size={14} style={{ position: 'absolute', left: 10, color: accentColor, pointerEvents: 'none', flexShrink: 0 }} />
+      <input
+        ref={inputRef}
+        type="text"
+        className="form-input"
+        placeholder={placeholder}
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        style={{ width: '100%', paddingLeft: 32, fontSize: 13 }}
+        autoComplete="off"
+      />
+      {query && (
+        <button
+          onClick={() => setQuery('')}
+          style={{ position: 'absolute', right: 8, background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}
+        >
+          <X size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ─── Route Map Modal ────────────────────────────────────────────────────── */
 function RouteMapModal({ onClose, onSave, loading }) {
   const mapRef = useRef(null);
@@ -70,10 +140,26 @@ function RouteMapModal({ onClose, onSave, loading }) {
   const [routeDuration, setRouteDuration] = useState(null);
   const [fetchingRoute, setFetchingRoute] = useState(false);
   const [locating, setLocating] = useState(false);
-  // FIX: store the encoded polyline returned by Directions API
   const [encodedPolyline, setEncodedPolyline] = useState('');
+  const [sheetOpen, setSheetOpen] = useState(false);
   const geocoder = useRef(null);
   const directionsService = useRef(null);
+
+  // Handle a place selected from the search box
+  const handleSearchPlace = useCallback((point, type) => {
+    if (!mapInstance.current) return;
+    mapInstance.current.setCenter({ lat: point.lat, lng: point.lng });
+    mapInstance.current.setZoom(15);
+    placeMarker(point.lat, point.lng, type, point.label);
+    if (type === 'start') {
+      setStartPoint(point);
+      setStep(endPoint ? 'confirm' : 'end');
+    } else {
+      setEndPoint(point);
+      setStep('confirm');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endPoint]);
 
   useEffect(() => {
     if (!MAPS_API_KEY) return;
@@ -317,21 +403,36 @@ function RouteMapModal({ onClose, onSave, loading }) {
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(5,8,15,0.95)', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
-      <div style={{ padding: '14px 16px', background: 'var(--bg-1)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16 }}>Add Route</div>
-          <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
-            {fetchingRoute ? '🔄 Calculating road route…' : stepMsg[step]}
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', flexDirection: 'column', background: '#05080f' }}>
+
+      {/* ── Top: Search header ── */}
+      <div style={{ flexShrink: 0, background: 'var(--bg-1)', borderBottom: '1px solid var(--border)', padding: '12px 16px 14px', zIndex: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16 }}>Add Route</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
+              {fetchingRoute ? '🔄 Calculating road route…' : stepMsg[step]}
+            </div>
           </div>
+          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border)', color: 'var(--text-1)', cursor: 'pointer', padding: 8, borderRadius: 8, display: 'flex' }}>
+            <X size={16} />
+          </button>
         </div>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-1)', cursor: 'pointer', padding: 4 }}>
-          <X size={18} />
-        </button>
+        {mapsReady && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 10, color: '#00e5a0', fontFamily: 'var(--font-mono)', fontWeight: 700, marginBottom: 4, letterSpacing: '0.06em' }}>🟢 START POINT</div>
+              <PlaceSearchBox placeholder="Search start location…" accentColor="#00e5a0" onPlace={(p) => handleSearchPlace(p, 'start')} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: '#ff4d6d', fontFamily: 'var(--font-mono)', fontWeight: 700, marginBottom: 4, letterSpacing: '0.06em' }}>🔴 END POINT</div>
+              <PlaceSearchBox placeholder="Search end location…" accentColor="#ff4d6d" onPlace={(p) => handleSearchPlace(p, 'end')} />
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Map */}
+      {/* ── Middle: Map ── */}
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
         {!MAPS_API_KEY ? (
           <div style={{ height: '100%', display: 'grid', placeItems: 'center', background: 'var(--bg-2)' }}>
@@ -365,11 +466,7 @@ function RouteMapModal({ onClose, onSave, loading }) {
 
         {/* Legend */}
         {mapsReady && (startPoint || endPoint) && (
-          <div style={{
-            position: 'absolute', top: 12, left: 12,
-            background: 'rgba(13,18,32,0.9)', border: '1px solid var(--border-bright)',
-            borderRadius: 8, padding: '8px 12px', fontSize: 11,
-          }}>
+          <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(13,18,32,0.92)', border: '1px solid var(--border-bright)', borderRadius: 8, padding: '8px 12px', fontSize: 11 }}>
             {startPoint && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: endPoint ? 4 : 0 }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#00e5a0', display: 'inline-block' }} />
@@ -392,112 +489,84 @@ function RouteMapModal({ onClose, onSave, loading }) {
           </div>
         )}
 
-        {/* Reset button when points set */}
+        {/* Reset */}
         {(startPoint || endPoint) && (
-          <button onClick={resetPoints} style={{
-            position: 'absolute', top: 12, right: 60,
-            background: 'rgba(13,18,32,0.9)', border: '1px solid var(--border-bright)',
-            borderRadius: 8, padding: '6px 10px',
-            color: 'var(--text-2)', cursor: 'pointer', fontSize: 11,
-          }}>
+          <button onClick={resetPoints} style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(13,18,32,0.92)', border: '1px solid var(--border-bright)', borderRadius: 8, padding: '6px 10px', color: 'var(--text-2)', cursor: 'pointer', fontSize: 11 }}>
             ↩ Reset
           </button>
         )}
       </div>
 
-      {/* Bottom panel */}
-      <div style={{ background: 'var(--bg-1)', borderTop: '1px solid var(--border)', padding: '16px', flexShrink: 0, overflowY: 'auto', maxHeight: '55vh' }}>
-        {/* Points summary */}
-        {startPoint && endPoint && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+      {/* ── Bottom Sheet ── */}
+      <div style={{ flexShrink: 0, background: 'var(--bg-1)', borderTop: '1px solid var(--border)', borderRadius: '20px 20px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,0.5)', transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)', maxHeight: sheetOpen ? '60vh' : '36px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Drag handle — tap to toggle */}
+        <div onClick={() => setSheetOpen(o => !o)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '10px 0', flexShrink: 0, cursor: 'pointer', userSelect: 'none' }}>
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: sheetOpen ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.2)', transition: 'background 0.2s' }} />
+        </div>
+
+        {/* Scrollable form — only visible when open */}
+        <div style={{ overflowY: 'auto', overscrollBehavior: 'contain', padding: '0 16px 28px', flex: 1 }}>
+          {/* Points summary */}
+          {startPoint && endPoint && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+              {[
+                { label: '🟢 Start', point: startPoint, color: 'var(--accent)' },
+                { label: '🔴 End', point: endPoint, color: '#ff4d6d' },
+              ].map(({ label, point, color }) => (
+                <div key={label} style={{ padding: '8px 10px', background: 'var(--bg-2)', border: `1px solid ${color}33`, borderRadius: 8 }}>
+                  <div style={{ fontSize: 10, color, fontWeight: 700, marginBottom: 2 }}>{label}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-1)' }}>{point.label}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
+                    {point.lat.toFixed(5)}, {point.lng.toFixed(5)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Route Name */}
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+              Route Name *
+            </label>
+            <input className="form-input" placeholder="e.g. Andheri → Bandra" value={routeName} onChange={e => setRouteName(e.target.value)} style={{ width: '100%' }} />
+          </div>
+
+          {/* Threshold sliders */}
+          <div style={{ marginBottom: 6, fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Threshold Zones</div>
+          <div style={{ background: 'var(--bg-2)', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
             {[
-              { label: '🟢 Start', point: startPoint, color: 'var(--accent)' },
-              { label: '🔴 End', point: endPoint, color: '#ff4d6d' },
-            ].map(({ label, point, color }) => (
-              <div key={label} style={{ padding: '8px 10px', background: 'var(--bg-2)', border: `1px solid ${color}33`, borderRadius: 8 }}>
-                <div style={{ fontSize: 10, color, fontWeight: 700, marginBottom: 2 }}>{label}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-1)' }}>{point.label}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
-                  {point.lat.toFixed(5)}, {point.lng.toFixed(5)}
+              { label: 'T1 – Start Area', desc: 'Circular pickup zone around start point', color: '#00e5a0', value: threshold1, set: setThreshold1 },
+              { label: 'T2 – End Area', desc: 'Circular drop-off zone around end point', color: '#ff4d6d', value: threshold2, set: setThreshold2 },
+              { label: 'T3 – Waypoint Radius', desc: 'Threshold for intermediate checkpoints', color: '#4d9fff', value: threshold3, set: setThreshold3 },
+            ].map(({ label, desc, color, value, set }) => (
+              <div key={label} style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color }}>{label}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-2)' }}>{desc}</div>
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color, fontFamily: 'var(--font-mono)', alignSelf: 'flex-start', marginTop: 2 }}>
+                    {value >= 1000 ? `${(value / 1000).toFixed(1)}km` : `${value}m`}
+                  </span>
+                </div>
+                <input type="range" min="100" max="5000" step="100" value={value} onChange={e => set(Number(e.target.value))} style={{ width: '100%', accentColor: color }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-2)' }}>
+                  <span>100m</span><span>5km</span>
                 </div>
               </div>
             ))}
           </div>
-        )}
 
-        {/* Route Name */}
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
-            Route Name *
-          </label>
-          <input
-            className="form-input"
-            placeholder="e.g. Andheri → Bandra"
-            value={routeName}
-            onChange={e => setRouteName(e.target.value)}
-            style={{ width: '100%' }}
-          />
-        </div>
-
-        {/* Threshold sliders */}
-        <div style={{ marginBottom: 6, fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-          Threshold Zones
-        </div>
-        <div style={{ background: 'var(--bg-2)', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
-          {[
-            {
-              label: 'T1 – Start Area',
-              desc: 'Circular pickup zone around start point',
-              color: '#00e5a0',
-              value: threshold1, set: setThreshold1,
-            },
-            {
-              label: 'T2 – End Area',
-              desc: 'Circular drop-off zone around end point',
-              color: '#ff4d6d',
-              value: threshold2, set: setThreshold2,
-            },
-            {
-              label: 'T3 – Waypoint Radius',
-              desc: 'Threshold for intermediate checkpoints',
-              color: '#4d9fff',
-              value: threshold3, set: setThreshold3,
-            },
-          ].map(({ label, desc, color, value, set }) => (
-            <div key={label} style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color }}>{label}</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-2)' }}>{desc}</div>
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 700, color, fontFamily: 'var(--font-mono)', alignSelf: 'flex-start', marginTop: 2 }}>
-                  {value >= 1000 ? `${(value / 1000).toFixed(1)}km` : `${value}m`}
-                </span>
-              </div>
-              <input
-                type="range" min="100" max="5000" step="100"
-                value={value}
-                onChange={e => set(Number(e.target.value))}
-                style={{ width: '100%', accentColor: color }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-2)' }}>
-                <span>100m</span><span>5km</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn-primary flex-1"
-            onClick={handleSave}
-            disabled={loading || !startPoint || !endPoint || !routeName.trim() || fetchingRoute || !encodedPolyline}
-          >
-            {loading ? 'Saving…' : fetchingRoute ? 'Routing…' : <><CheckCircle size={13} /> Save Route</>}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary flex-1" onClick={handleSave} disabled={loading || !startPoint || !endPoint || !routeName.trim() || fetchingRoute || !encodedPolyline}>
+              {loading ? 'Saving…' : fetchingRoute ? 'Routing…' : <><CheckCircle size={13} /> Save Route</>}
+            </button>
+          </div>
         </div>
       </div>
+
       <style>{`@keyframes ksp{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
@@ -514,7 +583,17 @@ function AreaMapModal({ onClose, onSave, loading }) {
   const [radius, setRadius] = useState(2000);
   const [areaName, setAreaName] = useState('');
   const [locating, setLocating] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const geocoder = useRef(null);
+
+  // Handle place selected from search
+  const handleSearchPlace = useCallback((point) => {
+    if (!mapInstance.current) return;
+    mapInstance.current.setCenter({ lat: point.lat, lng: point.lng });
+    mapInstance.current.setZoom(14);
+    placeCenter(point.lat, point.lng, point.label);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!MAPS_API_KEY) return;
@@ -606,19 +685,27 @@ function AreaMapModal({ onClose, onSave, loading }) {
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(5,8,15,0.95)', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '14px 16px', background: 'var(--bg-1)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16 }}>Add Delivery Area</div>
-          <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
-            {center ? '✅ Area set! Adjust radius and save.' : '📍 Tap on the map to set your coverage area'}
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', flexDirection: 'column', background: '#05080f' }}>
+
+      {/* ── Top: Search header ── */}
+      <div style={{ flexShrink: 0, background: 'var(--bg-1)', borderBottom: '1px solid var(--border)', padding: '12px 16px 14px', zIndex: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16 }}>Add Delivery Area</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
+              {center ? '✅ Area set! Adjust radius and save.' : '📍 Search or tap map to set area center'}
+            </div>
           </div>
+          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border)', color: 'var(--text-1)', cursor: 'pointer', padding: 8, borderRadius: 8, display: 'flex' }}>
+            <X size={16} />
+          </button>
         </div>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-1)', cursor: 'pointer', padding: 4 }}>
-          <X size={18} />
-        </button>
+        {mapsReady && (
+          <PlaceSearchBox placeholder="Search area location…" accentColor="#4d9fff" onPlace={handleSearchPlace} />
+        )}
       </div>
 
+      {/* ── Middle: Map ── */}
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
         {!MAPS_API_KEY ? (
           <div style={{ height: '100%', display: 'grid', placeItems: 'center', background: 'var(--bg-2)' }}>
@@ -636,6 +723,7 @@ function AreaMapModal({ onClose, onSave, loading }) {
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
         )}
 
+        {/* Locate me */}
         {mapsReady && (
           <button onClick={handleLocateMe} disabled={locating} style={{
             position: 'absolute', bottom: 16, right: 16,
@@ -649,12 +737,9 @@ function AreaMapModal({ onClose, onSave, loading }) {
           </button>
         )}
 
+        {/* Legend */}
         {mapsReady && center && (
-          <div style={{
-            position: 'absolute', top: 12, left: 12,
-            background: 'rgba(13,18,32,0.9)', border: '1px solid var(--border-bright)',
-            borderRadius: 8, padding: '8px 12px', fontSize: 11,
-          }}>
+          <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(13,18,32,0.92)', border: '1px solid var(--border-bright)', borderRadius: 8, padding: '8px 12px', fontSize: 11 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4d9fff', display: 'inline-block' }} />
               <span style={{ color: 'var(--text-1)' }}>{center.label}</span>
@@ -664,61 +749,48 @@ function AreaMapModal({ onClose, onSave, loading }) {
         )}
       </div>
 
-      <div style={{ background: 'var(--bg-1)', borderTop: '1px solid var(--border)', padding: '16px', flexShrink: 0 }}>
-        {center && (
-          <div style={{ padding: '10px 12px', background: 'var(--blue-dim)', border: '1px solid rgba(77,159,255,0.25)', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
-            <div style={{ fontWeight: 600, color: 'var(--blue)', marginBottom: 2 }}>📍 Center</div>
-            <div style={{ color: 'var(--text-1)' }}>{center.label}</div>
-            <div style={{ color: 'var(--text-2)', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
-              {center.lat.toFixed(6)}, {center.lng.toFixed(6)}
+      {/* ── Bottom Sheet ── */}
+      <div style={{ flexShrink: 0, background: 'var(--bg-1)', borderTop: '1px solid var(--border)', borderRadius: '20px 20px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,0.5)', transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)', maxHeight: sheetOpen ? '60vh' : '36px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Drag handle — tap to toggle */}
+        <div onClick={() => setSheetOpen(o => !o)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '10px 0', flexShrink: 0, cursor: 'pointer', userSelect: 'none' }}>
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: sheetOpen ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.2)', transition: 'background 0.2s' }} />
+        </div>
+
+        {/* Scrollable form — only visible when open */}
+        <div style={{ overflowY: 'auto', overscrollBehavior: 'contain', padding: '0 16px 28px', flex: 1 }}>
+          {center && (
+            <div style={{ padding: '10px 12px', background: 'var(--blue-dim)', border: '1px solid rgba(77,159,255,0.25)', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
+              <div style={{ fontWeight: 600, color: 'var(--blue)', marginBottom: 2 }}>📍 Center</div>
+              <div style={{ color: 'var(--text-1)' }}>{center.label}</div>
+              <div style={{ color: 'var(--text-2)', fontSize: 11, fontFamily: 'var(--font-mono)' }}>{center.lat.toFixed(6)}, {center.lng.toFixed(6)}</div>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>Area Name *</label>
+            <input className="form-input" placeholder="e.g. Andheri West" value={areaName} onChange={e => setAreaName(e.target.value)} style={{ width: '100%' }} />
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <label style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Radius</label>
+              <span style={{ fontSize: 12, color: 'var(--blue)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{(radius / 1000).toFixed(1)} km</span>
+            </div>
+            <input type="range" min="500" max="20000" step="500" value={radius} onChange={e => setRadius(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--blue)' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-2)' }}>
+              <span>0.5 km</span><span>20 km</span>
             </div>
           </div>
-        )}
 
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
-            Area Name *
-          </label>
-          <input
-            className="form-input"
-            placeholder="e.g. Andheri West"
-            value={areaName}
-            onChange={e => setAreaName(e.target.value)}
-            style={{ width: '100%' }}
-          />
-        </div>
-
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <label style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-              Radius
-            </label>
-            <span style={{ fontSize: 12, color: 'var(--blue)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-              {(radius / 1000).toFixed(1)} km
-            </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary flex-1" onClick={handleSave} disabled={loading || !center || !areaName.trim()}>
+              {loading ? 'Saving…' : <><CheckCircle size={13} /> Save Area</>}
+            </button>
           </div>
-          <input
-            type="range" min="500" max="20000" step="500"
-            value={radius}
-            onChange={e => setRadius(Number(e.target.value))}
-            style={{ width: '100%', accentColor: 'var(--blue)' }}
-          />
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-2)' }}>
-            <span>0.5 km</span><span>20 km</span>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn-primary flex-1"
-            onClick={handleSave}
-            disabled={loading || !center || !areaName.trim()}
-          >
-            {loading ? 'Saving…' : <><CheckCircle size={13} /> Save Area</>}
-          </button>
         </div>
       </div>
+
       <style>{`@keyframes ksp{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
@@ -1122,7 +1194,6 @@ export default function RoutesAreasPage() {
     setActionLoading(true);
     try {
       // ── Service Area Pre-validation ───────────────────────────────────
-      // Validate before even sending to backend, for a fast friendly error.
       try {
         const { data: saData } = await serviceAreaAPI.validate(
           form.node1.latitude, form.node1.longitude,
@@ -1140,7 +1211,7 @@ export default function RoutesAreasPage() {
       await ridersAPI.addRoute(user.uid, form);
       toast.success('Route added!');
       setModal(null);
-      fetchData();
+      try { await fetchData(); } catch { /* index may not exist yet, list will refresh on next load */ }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to add route');
     } finally { setActionLoading(false); }
@@ -1185,7 +1256,7 @@ export default function RoutesAreasPage() {
       await ridersAPI.addArea(user.uid, form);
       toast.success('Area added!');
       setModal(null);
-      fetchData();
+      try { await fetchData(); } catch { /* index may not exist yet, list will refresh on next load */ }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to add area');
     } finally { setActionLoading(false); }
