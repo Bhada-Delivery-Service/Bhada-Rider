@@ -1160,6 +1160,25 @@ export default function RoutesAreasPage() {
   const addArea = async (form) => {
     setActionLoading(true);
     try {
+      // ── Service Area Pre-validation ───────────────────────────────────
+      try {
+        const { data: saData } = await serviceAreaAPI.validateArea(
+          form.node.latitude,
+          form.node.longitude,
+        );
+        if (!saData.data.serviced) {
+          toast.error(
+            saData.data.failReason ||
+            'The selected area is outside active service zones. Contact admin to expand coverage.',
+            { duration: 6000 },
+          );
+          setActionLoading(false);
+          return;
+        }
+      } catch {
+        // If the validation endpoint fails, let the backend handle it
+      }
+      // ── Proceed with registration ─────────────────────────────────────
       await ridersAPI.addArea(user.uid, form);
       toast.success('Area added!');
       setModal(null);

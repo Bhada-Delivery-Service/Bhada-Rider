@@ -184,9 +184,11 @@ export const securityDepositAPI = {
 
 // ─── Service Area ──────────────────────────────────────────────────────────
 export const serviceAreaAPI = {
-  getActive:  ()                        => api.get('/service-areas/active'),
-  validate:   (pLat, pLng, dLat, dLng) =>
+  getActive:     ()                        => api.get('/service-areas/active'),
+  validate:      (pLat, pLng, dLat, dLng) =>
     api.get(`/service-areas/validate?pickupLat=${pLat}&pickupLng=${pLng}&dropLat=${dLat}&dropLng=${dLng}`),
+  validateArea:  (lat, lng)               =>
+    api.get(`/service-areas/validate-area?lat=${lat}&lng=${lng}`),
 };
 
 export default api;
