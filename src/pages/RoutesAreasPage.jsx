@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   MapPin, Plus, Trash2, RefreshCw, X, Route, Navigation,
-  Circle, CheckCircle, Crosshair, ChevronRight,
+  Circle, CheckCircle, Crosshair, ChevronRight, Eye, Layers,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ridersAPI, serviceAreaAPI } from '../services/api';
@@ -724,6 +724,373 @@ function AreaMapModal({ onClose, onSave, loading }) {
   );
 }
 
+/* ─── View Map Modal ─────────────────────────────────────────────────────── */
+/**
+ * Read-only map showing all of a rider's registered routes and areas.
+ *
+ * Routes  — decoded from Google Encoded Polyline (`encoding` field), drawn as
+ *           a coloured polyline.  T1 circle (start), T2 circle (end), T3
+ *           corridor circles along the middle waypoints are also shown.
+ * Areas   — drawn as a circle centred on `node` with radius `threshold`.
+ *
+ * The rider can tap a route/area chip at the top to isolate it on the map,
+ * or tap "All" to see everything at once.
+ */
+function ViewMapModal({ routes, areas, onClose, initialTab }) {
+  const mapRef       = useRef(null);
+  const mapInstance  = useRef(null);
+  const overlaysRef  = useRef([]);           // all map overlays (polylines, circles, markers)
+  const [mapsReady, setMapsReady]   = useState(mapsLoaded);
+  const [activeTab,  setActiveTab]  = useState(initialTab || 'routes');
+  const [selectedId, setSelectedId] = useState('all');
+  const [legendItems, setLegendItems] = useState([]);
+
+  /* ── Load Google Maps ─────────────────────────────────────────────── */
+  useEffect(() => {
+    if (!MAPS_API_KEY) return;
+    loadGoogleMaps(MAPS_API_KEY)
+      .then(() => setMapsReady(true))
+      .catch(() => toast.error('Failed to load Google Maps'));
+  }, []);
+
+  /* ── Initialise map ───────────────────────────────────────────────── */
+  useEffect(() => {
+    if (!mapsReady || !mapRef.current || mapInstance.current) return;
+    mapInstance.current = new window.google.maps.Map(mapRef.current, {
+      center: DEFAULT_CENTER, zoom: 12,
+      styles: DARK_STYLE, disableDefaultUI: true, zoomControl: true,
+      gestureHandling: 'greedy',
+    });
+    // After map is ready, draw
+    drawOverlays(activeTab, selectedId);
+  }, [mapsReady]);
+
+  /* ── Re-draw whenever selection changes ──────────────────────────── */
+  useEffect(() => {
+    if (!mapInstance.current) return;
+    drawOverlays(activeTab, selectedId);
+  }, [activeTab, selectedId, routes, areas]);
+
+  /* ── Colours per index ────────────────────────────────────────────── */
+  const ROUTE_COLOURS = ['#00e5a0', '#ffcc00', '#ff6b6b', '#b388ff', '#40c8e0'];
+  const AREA_COLOURS  = ['#4d9fff', '#ff9f43', '#ee5a24', '#a29bfe', '#55efc4'];
+
+  /* ── Clear all overlays ───────────────────────────────────────────── */
+  const clearOverlays = () => {
+    overlaysRef.current.forEach(o => o.setMap(null));
+    overlaysRef.current = [];
+  };
+
+  /* ── Draw everything ──────────────────────────────────────────────── */
+  const drawOverlays = (tab, selId) => {
+    if (!mapInstance.current || !window.google) return;
+    clearOverlays();
+    const bounds = new window.google.maps.LatLngBounds();
+    let hasPoints = false;
+    const newLegend = [];
+
+    if (tab === 'routes') {
+      const list = selId === 'all' ? routes : routes.filter(r => (r.id || r.routeId) === selId);
+      list.forEach((route, idx) => {
+        const color = ROUTE_COLOURS[idx % ROUTE_COLOURS.length];
+        const n1 = route.node1 || {};
+        const n2 = route.node2 || {};
+
+        /* ── Decode polyline ── */
+        let decodedPath = [];
+        if (route.encoding && window.google.maps.geometry?.encoding) {
+          try {
+            decodedPath = window.google.maps.geometry.encoding.decodePath(route.encoding);
+          } catch (_) {}
+        }
+        // Fallback: straight line between node1 and node2
+        if (decodedPath.length < 2 && n1.latitude && n2.latitude) {
+          decodedPath = [
+            new window.google.maps.LatLng(n1.latitude, n1.longitude),
+            new window.google.maps.LatLng(n2.latitude, n2.longitude),
+          ];
+        }
+
+        if (decodedPath.length >= 2) {
+          /* Route polyline */
+          const poly = new window.google.maps.Polyline({
+            path: decodedPath,
+            strokeColor: color,
+            strokeOpacity: 0.85,
+            strokeWeight: 4,
+            map: mapInstance.current,
+          });
+          overlaysRef.current.push(poly);
+          decodedPath.forEach(p => bounds.extend(p));
+          hasPoints = true;
+
+          /* T3 corridor circles along middle waypoints */
+          if (route.threshold3 && decodedPath.length > 2) {
+            const step = Math.max(1, Math.floor(decodedPath.length / 8));
+            for (let i = step; i < decodedPath.length - step; i += step) {
+              const cc = new window.google.maps.Circle({
+                center: { lat: decodedPath[i].lat(), lng: decodedPath[i].lng() },
+                radius: route.threshold3,
+                strokeColor: color, strokeOpacity: 0.15, strokeWeight: 1,
+                fillColor: color, fillOpacity: 0.04,
+                map: mapInstance.current,
+              });
+              overlaysRef.current.push(cc);
+            }
+          }
+
+          /* T1 circle – start */
+          if (n1.latitude && route.threshold1) {
+            const c1 = new window.google.maps.Circle({
+              center: { lat: n1.latitude, lng: n1.longitude },
+              radius: route.threshold1,
+              strokeColor: color, strokeOpacity: 0.6, strokeWeight: 2,
+              fillColor: color, fillOpacity: 0.1,
+              map: mapInstance.current,
+            });
+            overlaysRef.current.push(c1);
+          }
+
+          /* T2 circle – end */
+          if (n2.latitude && route.threshold2) {
+            const c2 = new window.google.maps.Circle({
+              center: { lat: n2.latitude, lng: n2.longitude },
+              radius: route.threshold2,
+              strokeColor: '#ff4d6d', strokeOpacity: 0.6, strokeWeight: 2,
+              fillColor: '#ff4d6d', fillOpacity: 0.1,
+              map: mapInstance.current,
+            });
+            overlaysRef.current.push(c2);
+          }
+
+          /* Start marker */
+          if (n1.latitude) {
+            const sm = new window.google.maps.Marker({
+              position: { lat: n1.latitude, lng: n1.longitude },
+              map: mapInstance.current,
+              title: n1.label || 'Start',
+              icon: {
+                path: window.google.maps.SymbolPath.CIRCLE,
+                scale: 9, fillColor: color, fillOpacity: 1,
+                strokeColor: '#fff', strokeWeight: 2,
+              },
+            });
+            const iw = new window.google.maps.InfoWindow({
+              content: `<div style="color:#0d1220;font-size:12px;font-weight:600;">🟢 ${n1.label || 'Start'}</div>`,
+            });
+            sm.addListener('click', () => iw.open(mapInstance.current, sm));
+            overlaysRef.current.push(sm);
+          }
+
+          /* End marker */
+          if (n2.latitude) {
+            const em = new window.google.maps.Marker({
+              position: { lat: n2.latitude, lng: n2.longitude },
+              map: mapInstance.current,
+              title: n2.label || 'End',
+              icon: {
+                path: window.google.maps.SymbolPath.CIRCLE,
+                scale: 9, fillColor: '#ff4d6d', fillOpacity: 1,
+                strokeColor: '#fff', strokeWeight: 2,
+              },
+            });
+            const iw2 = new window.google.maps.InfoWindow({
+              content: `<div style="color:#0d1220;font-size:12px;font-weight:600;">🔴 ${n2.label || 'End'}</div>`,
+            });
+            em.addListener('click', () => iw2.open(mapInstance.current, em));
+            overlaysRef.current.push(em);
+          }
+        }
+
+        newLegend.push({
+          id: route.id || route.routeId,
+          label: route.routeName || `${n1.label || '?'} → ${n2.label || '?'}`,
+          color,
+          sub: route.threshold1 ? `T1:${route.threshold1}m · T2:${route.threshold2}m · T3:${route.threshold3}m` : '',
+        });
+      });
+    } else {
+      /* Areas */
+      const list = selId === 'all' ? areas : areas.filter(a => (a.id || a.areaId) === selId);
+      list.forEach((area, idx) => {
+        const color = AREA_COLOURS[idx % AREA_COLOURS.length];
+        const node = area.node || {};
+        if (!node.latitude) return;
+
+        const circle = new window.google.maps.Circle({
+          center: { lat: node.latitude, lng: node.longitude },
+          radius: area.threshold || 2000,
+          strokeColor: color, strokeOpacity: 0.8, strokeWeight: 2,
+          fillColor: color, fillOpacity: 0.12,
+          map: mapInstance.current,
+        });
+        overlaysRef.current.push(circle);
+        bounds.union(circle.getBounds());
+        hasPoints = true;
+
+        const marker = new window.google.maps.Marker({
+          position: { lat: node.latitude, lng: node.longitude },
+          map: mapInstance.current,
+          title: area.areaName || area.name || 'Area',
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: 8, fillColor: color, fillOpacity: 1,
+            strokeColor: '#fff', strokeWeight: 2,
+          },
+        });
+        const iw = new window.google.maps.InfoWindow({
+          content: `<div style="color:#0d1220;font-size:12px;font-weight:600;">📍 ${area.areaName || area.name || 'Area'}<br/><span style="font-weight:400;font-size:11px;">Radius: ${((area.threshold || 2000) / 1000).toFixed(1)} km</span></div>`,
+        });
+        marker.addListener('click', () => iw.open(mapInstance.current, marker));
+        overlaysRef.current.push(marker);
+
+        newLegend.push({
+          id: area.id || area.areaId,
+          label: area.areaName || area.name || 'Area',
+          color,
+          sub: area.threshold ? `${((area.threshold) / 1000).toFixed(1)} km radius` : '',
+        });
+      });
+    }
+
+    setLegendItems(newLegend);
+    if (hasPoints && !bounds.isEmpty()) {
+      mapInstance.current.fitBounds(bounds, 60);
+    }
+  };
+
+  const activeItems = activeTab === 'routes' ? routes : areas;
+  const hasData = activeItems.length > 0;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(5,8,15,0.97)', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ padding: '14px 16px', background: 'var(--bg-1)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Layers size={18} style={{ color: 'var(--accent)' }} />
+          <div>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16 }}>My Coverage Map</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)' }}>Tap a route or area chip to highlight it</div>
+          </div>
+        </div>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-1)', cursor: 'pointer', padding: 4 }}>
+          <X size={18} />
+        </button>
+      </div>
+
+      {/* Tab switcher */}
+      <div style={{ display: 'flex', gap: 6, padding: '10px 16px 0', background: 'var(--bg-1)', flexShrink: 0 }}>
+        {[
+          { key: 'routes', label: `🛣 Routes (${routes.length})` },
+          { key: 'areas',  label: `📍 Areas (${areas.length})` },
+        ].map(t => (
+          <button key={t.key} onClick={() => { setActiveTab(t.key); setSelectedId('all'); }}
+            style={{
+              padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              fontSize: 12, fontWeight: 600,
+              background: activeTab === t.key ? 'var(--accent)' : 'var(--bg-2)',
+              color: activeTab === t.key ? '#000' : 'var(--text-2)',
+            }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Filter chips */}
+      {hasData && (
+        <div style={{
+          display: 'flex', gap: 6, padding: '8px 16px', overflowX: 'auto',
+          background: 'var(--bg-1)', borderBottom: '1px solid var(--border)', flexShrink: 0,
+        }}>
+          <button
+            onClick={() => setSelectedId('all')}
+            style={{
+              flexShrink: 0, padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              fontSize: 11, fontWeight: 600,
+              background: selectedId === 'all' ? 'var(--accent)' : 'var(--bg-2)',
+              color: selectedId === 'all' ? '#000' : 'var(--text-2)',
+            }}>
+            All
+          </button>
+          {activeItems.map((item, idx) => {
+            const id = item.id || item.routeId || item.areaId;
+            const label = item.routeName || item.areaName || item.name || `#${idx + 1}`;
+            const colors = activeTab === 'routes' ? ROUTE_COLOURS : AREA_COLOURS;
+            const color = colors[idx % colors.length];
+            const isSelected = selectedId === id;
+            return (
+              <button key={id} onClick={() => setSelectedId(isSelected ? 'all' : id)}
+                style={{
+                  flexShrink: 0, padding: '4px 12px', borderRadius: 20, border: `1.5px solid ${color}`,
+                  cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                  background: isSelected ? color : 'transparent',
+                  color: isSelected ? '#000' : color,
+                }}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Map */}
+      <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+        {!MAPS_API_KEY ? (
+          <div style={{ height: '100%', display: 'grid', placeItems: 'center', background: 'var(--bg-2)' }}>
+            <div style={{ textAlign: 'center', color: 'var(--text-2)', padding: 20 }}>
+              <MapPin size={32} style={{ marginBottom: 12, opacity: 0.4 }} />
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Google Maps API key not set</div>
+              <div style={{ fontSize: 12 }}>Add VITE_GOOGLE_MAPS_API_KEY to your .env file</div>
+            </div>
+          </div>
+        ) : !mapsReady ? (
+          <div style={{ height: '100%', display: 'grid', placeItems: 'center', background: 'var(--bg-2)' }}>
+            <div className="loader" />
+          </div>
+        ) : !hasData ? (
+          <div style={{ height: '100%', display: 'grid', placeItems: 'center', background: 'var(--bg-2)' }}>
+            <div style={{ textAlign: 'center', color: 'var(--text-2)', padding: 20 }}>
+              <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.5 }}>{activeTab === 'routes' ? '🛣' : '📍'}</div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                No {activeTab === 'routes' ? 'routes' : 'areas'} registered
+              </div>
+              <div style={{ fontSize: 12 }}>Add {activeTab === 'routes' ? 'a route' : 'an area'} first</div>
+            </div>
+          </div>
+        ) : (
+          <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+        )}
+
+        {/* Legend overlay */}
+        {mapsReady && hasData && legendItems.length > 0 && (
+          <div style={{
+            position: 'absolute', bottom: 16, left: 12,
+            background: 'rgba(13,18,32,0.92)', border: '1px solid var(--border-bright)',
+            borderRadius: 10, padding: '8px 12px', maxWidth: 'calc(100vw - 24px)',
+            overflowX: 'auto',
+          }}>
+            {legendItems.map(item => (
+              <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: legendItems.length > 1 ? 6 : 0 }}>
+                <span style={{
+                  width: activeTab === 'routes' ? 18 : 10, height: activeTab === 'routes' ? 3 : 10,
+                  borderRadius: activeTab === 'routes' ? 2 : '50%',
+                  background: item.color, display: 'inline-block', flexShrink: 0,
+                  marginTop: activeTab === 'routes' ? 7 : 4,
+                  border: activeTab === 'areas' ? `2px solid ${item.color}` : 'none',
+                }} />
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-1)', fontWeight: 600 }}>{item.label}</div>
+                  {item.sub && <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>{item.sub}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main Page ──────────────────────────────────────────────────────────── */
 export default function RoutesAreasPage() {
   const { user } = useAuth();
@@ -733,6 +1100,7 @@ export default function RoutesAreasPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [modal, setModal] = useState(null);
+  const [viewModal, setViewModal] = useState(null); // null | 'routes' | 'areas'
 
   const fetchData = useCallback(async () => {
     if (!user?.uid) return;
@@ -843,9 +1211,16 @@ export default function RoutesAreasPage() {
         <div className="loading-center"><div className="loader" /></div>
       ) : tab === 'routes' ? (
         <>
-          <button className="btn btn-primary btn-sm" style={{ width: '100%', marginBottom: 16 }} onClick={() => setModal('route')}>
-            <Plus size={14} /> Add Route on Map
-          </button>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={() => setModal('route')}>
+              <Plus size={14} /> Add Route on Map
+            </button>
+            {routes.length > 0 && (
+              <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => setViewModal('routes')}>
+                <Eye size={14} /> View on Map
+              </button>
+            )}
+          </div>
           {routes.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon"><Route size={20} /></div>
@@ -877,10 +1252,16 @@ export default function RoutesAreasPage() {
                       </div>
                     )}
                   </div>
-                  <button className="btn btn-danger btn-sm" style={{ padding: 8 }}
-                    onClick={() => deleteRoute(route.id || route.routeId)}>
-                    <Trash2 size={13} />
-                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-ghost btn-sm" style={{ padding: 8 }}
+                      onClick={() => { setViewModal('routes'); }}>
+                      <Eye size={13} />
+                    </button>
+                    <button className="btn btn-danger btn-sm" style={{ padding: 8 }}
+                      onClick={() => deleteRoute(route.id || route.routeId)}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -888,9 +1269,16 @@ export default function RoutesAreasPage() {
         </>
       ) : (
         <>
-          <button className="btn btn-primary btn-sm" style={{ width: '100%', marginBottom: 16 }} onClick={() => setModal('area')}>
-            <Plus size={14} /> Add Area on Map
-          </button>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={() => setModal('area')}>
+              <Plus size={14} /> Add Area on Map
+            </button>
+            {areas.length > 0 && (
+              <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => setViewModal('areas')}>
+                <Eye size={14} /> View on Map
+              </button>
+            )}
+          </div>
           {areas.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon"><Circle size={20} /></div>
@@ -915,10 +1303,16 @@ export default function RoutesAreasPage() {
                       </div>
                     )}
                   </div>
-                  <button className="btn btn-danger btn-sm" style={{ padding: 8 }}
-                    onClick={() => deleteArea(area.id || area.areaId)}>
-                    <Trash2 size={13} />
-                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-ghost btn-sm" style={{ padding: 8 }}
+                      onClick={() => setViewModal('areas')}>
+                      <Eye size={13} />
+                    </button>
+                    <button className="btn btn-danger btn-sm" style={{ padding: 8 }}
+                      onClick={() => deleteArea(area.id || area.areaId)}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -938,6 +1332,14 @@ export default function RoutesAreasPage() {
           loading={actionLoading}
           onClose={() => setModal(null)}
           onSave={addArea}
+        />
+      )}
+      {viewModal && (
+        <ViewMapModal
+          routes={routes}
+          areas={areas}
+          initialTab={viewModal}
+          onClose={() => setViewModal(null)}
         />
       )}
     </div>
