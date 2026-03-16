@@ -1148,12 +1148,15 @@ export default function RoutesAreasPage() {
 
   const deleteRoute = async (routeId) => {
     if (!window.confirm('Delete this route?')) return;
+    // Optimistically remove from UI immediately
+    setRoutes(prev => prev.filter(r => (r.id || r.routeId) !== routeId));
     try {
       await ridersAPI.deleteRoute(user.uid, routeId);
       toast.success('Route deleted');
-      fetchData();
+      await fetchData();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to delete');
+      await fetchData(); // restore accurate state on error
     }
   };
 
@@ -1190,12 +1193,15 @@ export default function RoutesAreasPage() {
 
   const deleteArea = async (areaId) => {
     if (!window.confirm('Delete this area?')) return;
+    // Optimistically remove from UI immediately
+    setAreas(prev => prev.filter(a => (a.id || a.areaId) !== areaId));
     try {
       await ridersAPI.deleteArea(user.uid, areaId);
       toast.success('Area deleted');
-      fetchData();
+      await fetchData();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to delete');
+      await fetchData(); // restore accurate state on error
     }
   };
 
