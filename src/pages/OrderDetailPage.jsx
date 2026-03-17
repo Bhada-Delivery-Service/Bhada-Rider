@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Package, MapPin, Navigation, CheckCircle,
@@ -278,22 +278,29 @@ export default function OrderDetailPage() {
     } catch { /* silent — optimistic update already applied */ }
   };
 
-  // Fetch COD payment data (QR + status) when order is COD
-  const fetchCodPayment = async (orderData) => {
+  // Fetch COD payment data (QR + status) when order is COD.
+  // useCallback so the stable reference can be safely used in useEffect deps.
+  // NOTE: no early-return guard on paymentStatus here — always re-fetch when
+  // called explicitly (e.g. after order:updated) so stale state never blocks.
+  const fetchCodPayment = useCallback(async (orderData) => {
     if (!orderData || orderData.billing?.paymentMode !== 'COD') return;
-    if (codPayment?.paymentStatus === 'PAID') return;
     setCodLoading(true);
     try {
-      const { data } = await ordersAPI.getPayment(id);
-      setCodPayment(data?.data || data);
+      const { data } = await ordersAPI.getPayment(orderData.orderId || id);
+      const record = data?.data || data;
+      setCodPayment(record);
     } catch { /* silent */ }
     finally { setCodLoading(false); }
-  };
+  }, [id]);
 
   useEffect(() => { fetchOrder(); }, [id]);
 
-  // Load COD payment after order loads or status changes
-  useEffect(() => { if (order) fetchCodPayment(order); }, [order?.status]);
+  // Load COD payment on initial order load AND whenever billing status changes.
+  // billing?.status changes PENDING→PAID when webhook fires + order:updated arrives.
+  // order?.status alone is NOT enough — status stays DISPATCHED after COD payment.
+  useEffect(() => {
+    if (order) fetchCodPayment(order);
+  }, [order?.status, order?.billing?.status, fetchCodPayment]);
 
   // Real-time: customer paid via QR/Pay Now
   useEffect(() => {
@@ -311,6 +318,7 @@ export default function OrderDetailPage() {
   // ── Real-time: update this order page when status changes elsewhere ───────
   // e.g. sender marks package ready (PLACED → READY), admin cancels, deliver completes
   // Also handles: rider was revoked/dropped — order back to PLACED with no assignedRiderId
+  // Also handles: COD billing marked PAID — order:updated now arrives after webhook
   useEffect(() => {
     const handler = (e) => {
       const updated = e.detail;
@@ -334,10 +342,22 @@ export default function OrderDetailPage() {
       }
 
       setOrder(prev => prev ? { ...prev, ...updated } : updated);
+
+      // If billing status changed to PAID (COD webhook fired), re-fetch
+      // codPayment immediately so the QR card and OTP button update at once.
+      const prevBillingStatus = order?.billing?.status;
+      const nextBillingStatus = updated?.billing?.status;
+      if (
+        updated.billing?.paymentMode === 'COD' &&
+        nextBillingStatus === 'PAID' &&
+        prevBillingStatus !== 'PAID'
+      ) {
+        fetchCodPayment(updated);
+      }
     };
     window.addEventListener('ws:order:updated', handler);
     return () => window.removeEventListener('ws:order:updated', handler);
-  }, [id, order, navigate]);
+  }, [id, order, navigate, fetchCodPayment]);
 
   const handleAction = (action, extra) => {
     guard(async () => {
@@ -785,10 +805,46 @@ export default function OrderDetailPage() {
           )}
           {status === 'DISPATCHED' && (
             <>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => { setShowDeliver(true); setShowHandover(false); }}>
-                <CheckCircle size={15} /> Enter Drop OTP
-              </button>
-              <button className="btn btn-danger btn-sm" onClick={() => setShowCancel(true)}><X size={15} /></button>
+              {order.billing?.paymentMode === 'COD' && codPayment?.paymentStatus !== 'PAID' ? (
+                /* ── COD payment not yet received — block OTP entry ── */
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{
+                    padding: '11px 14px', borderRadius: 12,
+                    background: 'rgba(245,158,11,0.10)',
+                    border: '1px solid rgba(245,158,11,0.35)',
+                    fontSize: 12, color: 'var(--orange)',
+                    fontWeight: 600, textAlign: 'center', lineHeight: 1.5,
+                  }}>
+                    ⚠️ Payment pending — show the QR code to the customer and wait for confirmation before delivering.
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      className="btn btn-primary"
+                      style={{ flex: 1, opacity: 0.4, cursor: 'not-allowed' }}
+                      disabled
+                    >
+                      <CheckCircle size={15} /> Enter Drop OTP
+                    </button>
+                    <button className="btn btn-danger btn-sm" onClick={() => setShowCancel(true)}>
+                      <X size={15} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* ── Payment received (or non-COD) — allow OTP entry ── */
+                <>
+                  <button
+                    className="btn btn-primary"
+                    style={{ flex: 1 }}
+                    onClick={() => { setShowDeliver(true); setShowHandover(false); }}
+                  >
+                    <CheckCircle size={15} /> Enter Drop OTP
+                  </button>
+                  <button className="btn btn-danger btn-sm" onClick={() => setShowCancel(true)}>
+                    <X size={15} />
+                  </button>
+                </>
+              )}
             </>
           )}
           {['DELIVERED', 'CANCELLED'].includes(status) && (
