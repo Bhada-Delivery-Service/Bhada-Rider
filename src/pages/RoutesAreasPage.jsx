@@ -52,12 +52,6 @@ const DARK_STYLE = [
 ];
 
 /* ─── Reusable Place Search Box ──────────────────────────────────────────── */
-/**
- * Renders a search input that uses Google Places Autocomplete.
- * When a place is selected, calls onPlace({ lat, lng, label }).
- * `placeholder` – hint text shown inside the input.
- * `accentColor`  – colour used for the search icon and suggestions highlight.
- */
 function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentColor = '#00e5a0' }) {
   const inputRef = useRef(null);
   const autocompleteRef = useRef(null);
@@ -65,10 +59,10 @@ function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentCol
 
   useEffect(() => {
     if (!window.google?.maps?.places || !inputRef.current) return;
-    if (autocompleteRef.current) return; // already initialised
+    if (autocompleteRef.current) return;
 
     autocompleteRef.current = new window.google.maps.places.Autocomplete(inputRef.current, {
-      componentRestrictions: { country: 'in' }, // restrict to India — remove if global needed
+      componentRestrictions: { country: 'in' },
       fields: ['geometry', 'name', 'formatted_address', 'address_components'],
     });
 
@@ -79,7 +73,6 @@ function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentCol
       const lat = place.geometry.location.lat();
       const lng = place.geometry.location.lng();
 
-      // Build a short human-readable label (sublocality → locality → name)
       const comps = place.address_components || [];
       const sub = comps.find(c => c.types.includes('sublocality_level_1') || c.types.includes('sublocality'));
       const loc = comps.find(c => c.types.includes('locality'));
@@ -90,7 +83,6 @@ function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentCol
     });
 
     return () => {
-      // Cleanup: remove PAC dropdown injected by Google
       const pacs = document.querySelectorAll('.pac-container');
       pacs.forEach(el => el.remove());
     };
@@ -129,7 +121,7 @@ function RouteMapModal({ onClose, onSave, loading }) {
   const directionsRendererRef = useRef(null);
   const circlesRef = useRef([]);
   const [mapsReady, setMapsReady] = useState(mapsLoaded);
-  const [step, setStep] = useState('start'); // 'start' | 'end' | 'confirm'
+  const [step, setStep] = useState('start');
   const [startPoint, setStartPoint] = useState(null);
   const [endPoint, setEndPoint] = useState(null);
   const [routeName, setRouteName] = useState('');
@@ -145,7 +137,6 @@ function RouteMapModal({ onClose, onSave, loading }) {
   const geocoder = useRef(null);
   const directionsService = useRef(null);
 
-  // Handle a place selected from the search box
   const handleSearchPlace = useCallback((point, type) => {
     if (!mapInstance.current) return;
     mapInstance.current.setCenter({ lat: point.lat, lng: point.lng });
@@ -210,12 +201,11 @@ function RouteMapModal({ onClose, onSave, loading }) {
     getCurrentLocation(map);
   }, [mapsReady]);
 
-  /* ─── FIX: Fetch real road route + capture encoded polyline ──────────── */
   useEffect(() => {
     if (!mapInstance.current || !startPoint || !endPoint || !directionsService.current) return;
 
     setFetchingRoute(true);
-    setEncodedPolyline(''); // reset on new route fetch
+    setEncodedPolyline('');
 
     directionsService.current.route(
       {
@@ -231,8 +221,6 @@ function RouteMapModal({ onClose, onSave, loading }) {
           setRouteDistance(leg?.distance?.text || null);
           setRouteDuration(leg?.duration?.text || null);
 
-          // FIX: Extract the Google Encoded Polyline from the Directions result
-          // overview_polyline is the encoded string the backend expects
           const overviewPolyline = result.routes[0]?.overview_polyline;
           setEncodedPolyline(overviewPolyline || '');
 
@@ -240,8 +228,6 @@ function RouteMapModal({ onClose, onSave, loading }) {
           mapInstance.current.fitBounds(bounds, 60);
         } else {
           toast.error('Could not fetch road route — showing straight line');
-          // Fallback: generate a simple encoded polyline for the two points
-          // so the backend still receives a valid encoding field
           if (window.google.maps.geometry?.encoding) {
             const fallbackPath = [
               new window.google.maps.LatLng(startPoint.lat, startPoint.lng),
@@ -265,7 +251,6 @@ function RouteMapModal({ onClose, onSave, loading }) {
     );
   }, [startPoint, endPoint]);
 
-  /* ─── Draw / update threshold circles ───────────────────────────────── */
   useEffect(() => {
     if (!mapInstance.current) return;
 
@@ -374,17 +359,15 @@ function RouteMapModal({ onClose, onSave, loading }) {
     setEndPoint(null);
     setRouteDistance(null);
     setRouteDuration(null);
-    setEncodedPolyline(''); // FIX: reset encoding on reset
+    setEncodedPolyline('');
     setStep('start');
   };
 
   const handleSave = () => {
     if (!startPoint || !endPoint) { toast.error('Set both start and end points'); return; }
     if (!routeName.trim()) { toast.error('Enter a route name'); return; }
-    // FIX: guard — encoding must be present before saving
     if (!encodedPolyline) { toast.error('Route encoding not ready yet, please wait'); return; }
 
-    // FIX: include `encoding` in the payload sent to the backend
     onSave({
       routeName: routeName.trim(),
       encoding: encodedPolyline,
@@ -450,10 +433,10 @@ function RouteMapModal({ onClose, onSave, loading }) {
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
         )}
 
-        {/* Locate me */}
+        {/* Locate me — zIndex: 1 so it stays behind the bottom sheet */}
         {mapsReady && (
           <button onClick={handleLocateMe} disabled={locating} style={{
-            position: 'absolute', bottom: 16, right: 16,
+            position: 'absolute', bottom: 16, right: 16, zIndex: 1,
             width: 44, height: 44, borderRadius: '50%',
             background: 'var(--bg-1)', border: '1px solid var(--border-bright)',
             color: locating ? 'var(--text-2)' : 'var(--accent)',
@@ -464,9 +447,13 @@ function RouteMapModal({ onClose, onSave, loading }) {
           </button>
         )}
 
-        {/* Legend */}
+        {/* Legend — zIndex: 1 so it stays behind the bottom sheet */}
         {mapsReady && (startPoint || endPoint) && (
-          <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(13,18,32,0.92)', border: '1px solid var(--border-bright)', borderRadius: 8, padding: '8px 12px', fontSize: 11 }}>
+          <div style={{
+            position: 'absolute', top: 12, left: 12, zIndex: 1,
+            background: 'rgba(13,18,32,0.92)', border: '1px solid var(--border-bright)',
+            borderRadius: 8, padding: '8px 12px', fontSize: 11,
+          }}>
             {startPoint && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: endPoint ? 4 : 0 }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#00e5a0', display: 'inline-block' }} />
@@ -489,19 +476,55 @@ function RouteMapModal({ onClose, onSave, loading }) {
           </div>
         )}
 
-        {/* Reset */}
+        {/* Reset — zIndex: 1 so it stays behind the bottom sheet */}
         {(startPoint || endPoint) && (
-          <button onClick={resetPoints} style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(13,18,32,0.92)', border: '1px solid var(--border-bright)', borderRadius: 8, padding: '6px 10px', color: 'var(--text-2)', cursor: 'pointer', fontSize: 11 }}>
+          <button onClick={resetPoints} style={{
+            position: 'absolute', top: 12, right: 12, zIndex: 1,
+            background: 'rgba(13,18,32,0.92)', border: '1px solid var(--border-bright)',
+            borderRadius: 8, padding: '6px 10px', color: 'var(--text-2)', cursor: 'pointer', fontSize: 11,
+          }}>
             ↩ Reset
           </button>
         )}
       </div>
 
-      {/* ── Bottom Sheet ── */}
-      <div style={{ flexShrink: 0, background: 'var(--bg-1)', borderTop: '1px solid var(--border)', borderRadius: '20px 20px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,0.5)', transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)', maxHeight: sheetOpen ? '60vh' : '36px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* ── Bottom Sheet — zIndex: 10 so it sits above all map overlays ── */}
+      <div style={{
+        flexShrink: 0,
+        background: 'var(--bg-1)',
+        borderTop: '3px solid var(--accent)',
+        borderRadius: '20px 20px 0 0',
+        boxShadow: '0 -8px 32px rgba(0,0,0,0.7)',
+        transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)',
+        maxHeight: sheetOpen ? '60vh' : '48px',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        position: 'relative',
+        zIndex: 10,
+      }}>
         {/* Drag handle — tap to toggle */}
-        <div onClick={() => setSheetOpen(o => !o)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '10px 0', flexShrink: 0, cursor: 'pointer', userSelect: 'none' }}>
-          <div style={{ width: 36, height: 4, borderRadius: 2, background: sheetOpen ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.2)', transition: 'background 0.2s' }} />
+        <div
+          onClick={() => setSheetOpen(o => !o)}
+          style={{
+            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            padding: '10px 16px 8px', flexShrink: 0, cursor: 'pointer',
+            userSelect: 'none', gap: 8,
+          }}
+        >
+          <div style={{
+            width: 40, height: 5, borderRadius: 3,
+            background: sheetOpen ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.35)',
+            transition: 'background 0.2s',
+          }} />
+          {!sheetOpen && (
+            <span style={{
+              fontSize: 11, color: 'var(--text-2)', fontWeight: 600,
+              letterSpacing: '0.06em', fontFamily: 'var(--font-mono)',
+            }}>
+              ROUTE DETAILS ↑
+            </span>
+          )}
         </div>
 
         {/* Scrollable form — only visible when open */}
@@ -586,7 +609,6 @@ function AreaMapModal({ onClose, onSave, loading }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const geocoder = useRef(null);
 
-  // Handle place selected from search
   const handleSearchPlace = useCallback((point) => {
     if (!mapInstance.current) return;
     mapInstance.current.setCenter({ lat: point.lat, lng: point.lng });
@@ -723,10 +745,10 @@ function AreaMapModal({ onClose, onSave, loading }) {
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
         )}
 
-        {/* Locate me */}
+        {/* Locate me — zIndex: 1 so it stays behind the bottom sheet */}
         {mapsReady && (
           <button onClick={handleLocateMe} disabled={locating} style={{
-            position: 'absolute', bottom: 16, right: 16,
+            position: 'absolute', bottom: 16, right: 16, zIndex: 1,
             width: 44, height: 44, borderRadius: '50%',
             background: 'var(--bg-1)', border: '1px solid var(--border-bright)',
             color: locating ? 'var(--text-2)' : 'var(--blue)',
@@ -737,9 +759,13 @@ function AreaMapModal({ onClose, onSave, loading }) {
           </button>
         )}
 
-        {/* Legend */}
+        {/* Legend — zIndex: 1 so it stays behind the bottom sheet */}
         {mapsReady && center && (
-          <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(13,18,32,0.92)', border: '1px solid var(--border-bright)', borderRadius: 8, padding: '8px 12px', fontSize: 11 }}>
+          <div style={{
+            position: 'absolute', top: 12, left: 12, zIndex: 1,
+            background: 'rgba(13,18,32,0.92)', border: '1px solid var(--border-bright)',
+            borderRadius: 8, padding: '8px 12px', fontSize: 11,
+          }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4d9fff', display: 'inline-block' }} />
               <span style={{ color: 'var(--text-1)' }}>{center.label}</span>
@@ -749,11 +775,43 @@ function AreaMapModal({ onClose, onSave, loading }) {
         )}
       </div>
 
-      {/* ── Bottom Sheet ── */}
-      <div style={{ flexShrink: 0, background: 'var(--bg-1)', borderTop: '1px solid var(--border)', borderRadius: '20px 20px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,0.5)', transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)', maxHeight: sheetOpen ? '60vh' : '36px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* ── Bottom Sheet — zIndex: 10 so it sits above all map overlays ── */}
+      <div style={{
+        flexShrink: 0,
+        background: 'var(--bg-1)',
+        borderTop: '3px solid var(--blue)',
+        borderRadius: '20px 20px 0 0',
+        boxShadow: '0 -8px 32px rgba(0,0,0,0.7)',
+        transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)',
+        maxHeight: sheetOpen ? '60vh' : '48px',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        position: 'relative',
+        zIndex: 10,
+      }}>
         {/* Drag handle — tap to toggle */}
-        <div onClick={() => setSheetOpen(o => !o)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '10px 0', flexShrink: 0, cursor: 'pointer', userSelect: 'none' }}>
-          <div style={{ width: 36, height: 4, borderRadius: 2, background: sheetOpen ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.2)', transition: 'background 0.2s' }} />
+        <div
+          onClick={() => setSheetOpen(o => !o)}
+          style={{
+            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            padding: '10px 16px 8px', flexShrink: 0, cursor: 'pointer',
+            userSelect: 'none', gap: 8,
+          }}
+        >
+          <div style={{
+            width: 40, height: 5, borderRadius: 3,
+            background: sheetOpen ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.35)',
+            transition: 'background 0.2s',
+          }} />
+          {!sheetOpen && (
+            <span style={{
+              fontSize: 11, color: 'var(--text-2)', fontWeight: 600,
+              letterSpacing: '0.06em', fontFamily: 'var(--font-mono)',
+            }}>
+              AREA DETAILS ↑
+            </span>
+          )}
         </div>
 
         {/* Scrollable form — only visible when open */}
@@ -797,27 +855,15 @@ function AreaMapModal({ onClose, onSave, loading }) {
 }
 
 /* ─── View Map Modal ─────────────────────────────────────────────────────── */
-/**
- * Read-only map showing all of a rider's registered routes and areas.
- *
- * Routes  — decoded from Google Encoded Polyline (`encoding` field), drawn as
- *           a coloured polyline.  T1 circle (start), T2 circle (end), T3
- *           corridor circles along the middle waypoints are also shown.
- * Areas   — drawn as a circle centred on `node` with radius `threshold`.
- *
- * The rider can tap a route/area chip at the top to isolate it on the map,
- * or tap "All" to see everything at once.
- */
 function ViewMapModal({ routes, areas, onClose, initialTab }) {
   const mapRef       = useRef(null);
   const mapInstance  = useRef(null);
-  const overlaysRef  = useRef([]);           // all map overlays (polylines, circles, markers)
+  const overlaysRef  = useRef([]);
   const [mapsReady, setMapsReady]   = useState(mapsLoaded);
   const [activeTab,  setActiveTab]  = useState(initialTab || 'routes');
   const [selectedId, setSelectedId] = useState('all');
   const [legendItems, setLegendItems] = useState([]);
 
-  /* ── Load Google Maps ─────────────────────────────────────────────── */
   useEffect(() => {
     if (!MAPS_API_KEY) return;
     loadGoogleMaps(MAPS_API_KEY)
@@ -825,7 +871,6 @@ function ViewMapModal({ routes, areas, onClose, initialTab }) {
       .catch(() => toast.error('Failed to load Google Maps'));
   }, []);
 
-  /* ── Initialise map ───────────────────────────────────────────────── */
   useEffect(() => {
     if (!mapsReady || !mapRef.current || mapInstance.current) return;
     mapInstance.current = new window.google.maps.Map(mapRef.current, {
@@ -833,27 +878,22 @@ function ViewMapModal({ routes, areas, onClose, initialTab }) {
       styles: DARK_STYLE, disableDefaultUI: true, zoomControl: true,
       gestureHandling: 'greedy',
     });
-    // After map is ready, draw
     drawOverlays(activeTab, selectedId);
   }, [mapsReady]);
 
-  /* ── Re-draw whenever selection changes ──────────────────────────── */
   useEffect(() => {
     if (!mapInstance.current) return;
     drawOverlays(activeTab, selectedId);
   }, [activeTab, selectedId, routes, areas]);
 
-  /* ── Colours per index ────────────────────────────────────────────── */
   const ROUTE_COLOURS = ['#00e5a0', '#ffcc00', '#ff6b6b', '#b388ff', '#40c8e0'];
   const AREA_COLOURS  = ['#4d9fff', '#ff9f43', '#ee5a24', '#a29bfe', '#55efc4'];
 
-  /* ── Clear all overlays ───────────────────────────────────────────── */
   const clearOverlays = () => {
     overlaysRef.current.forEach(o => o.setMap(null));
     overlaysRef.current = [];
   };
 
-  /* ── Draw everything ──────────────────────────────────────────────── */
   const drawOverlays = (tab, selId) => {
     if (!mapInstance.current || !window.google) return;
     clearOverlays();
@@ -868,14 +908,12 @@ function ViewMapModal({ routes, areas, onClose, initialTab }) {
         const n1 = route.node1 || {};
         const n2 = route.node2 || {};
 
-        /* ── Decode polyline ── */
         let decodedPath = [];
         if (route.encoding && window.google.maps.geometry?.encoding) {
           try {
             decodedPath = window.google.maps.geometry.encoding.decodePath(route.encoding);
           } catch (_) {}
         }
-        // Fallback: straight line between node1 and node2
         if (decodedPath.length < 2 && n1.latitude && n2.latitude) {
           decodedPath = [
             new window.google.maps.LatLng(n1.latitude, n1.longitude),
@@ -884,7 +922,6 @@ function ViewMapModal({ routes, areas, onClose, initialTab }) {
         }
 
         if (decodedPath.length >= 2) {
-          /* Route polyline */
           const poly = new window.google.maps.Polyline({
             path: decodedPath,
             strokeColor: color,
@@ -896,7 +933,6 @@ function ViewMapModal({ routes, areas, onClose, initialTab }) {
           decodedPath.forEach(p => bounds.extend(p));
           hasPoints = true;
 
-          /* T3 corridor circles along middle waypoints */
           if (route.threshold3 && decodedPath.length > 2) {
             const step = Math.max(1, Math.floor(decodedPath.length / 8));
             for (let i = step; i < decodedPath.length - step; i += step) {
@@ -911,7 +947,6 @@ function ViewMapModal({ routes, areas, onClose, initialTab }) {
             }
           }
 
-          /* T1 circle – start */
           if (n1.latitude && route.threshold1) {
             const c1 = new window.google.maps.Circle({
               center: { lat: n1.latitude, lng: n1.longitude },
@@ -923,7 +958,6 @@ function ViewMapModal({ routes, areas, onClose, initialTab }) {
             overlaysRef.current.push(c1);
           }
 
-          /* T2 circle – end */
           if (n2.latitude && route.threshold2) {
             const c2 = new window.google.maps.Circle({
               center: { lat: n2.latitude, lng: n2.longitude },
@@ -935,7 +969,6 @@ function ViewMapModal({ routes, areas, onClose, initialTab }) {
             overlaysRef.current.push(c2);
           }
 
-          /* Start marker */
           if (n1.latitude) {
             const sm = new window.google.maps.Marker({
               position: { lat: n1.latitude, lng: n1.longitude },
@@ -954,7 +987,6 @@ function ViewMapModal({ routes, areas, onClose, initialTab }) {
             overlaysRef.current.push(sm);
           }
 
-          /* End marker */
           if (n2.latitude) {
             const em = new window.google.maps.Marker({
               position: { lat: n2.latitude, lng: n2.longitude },
@@ -982,7 +1014,6 @@ function ViewMapModal({ routes, areas, onClose, initialTab }) {
         });
       });
     } else {
-      /* Areas */
       const list = selId === 'all' ? areas : areas.filter(a => (a.id || a.areaId) === selId);
       list.forEach((area, idx) => {
         const color = AREA_COLOURS[idx % AREA_COLOURS.length];
@@ -1172,7 +1203,7 @@ export default function RoutesAreasPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [modal, setModal] = useState(null);
-  const [viewModal, setViewModal] = useState(null); // null | 'routes' | 'areas'
+  const [viewModal, setViewModal] = useState(null);
 
   const fetchData = useCallback(async () => {
     if (!user?.uid) return;
@@ -1193,7 +1224,6 @@ export default function RoutesAreasPage() {
   const addRoute = async (form) => {
     setActionLoading(true);
     try {
-      // ── Service Area Pre-validation ───────────────────────────────────
       try {
         const { data: saData } = await serviceAreaAPI.validate(
           form.node1.latitude, form.node1.longitude,
@@ -1207,11 +1237,10 @@ export default function RoutesAreasPage() {
       } catch {
         // If validation endpoint fails, let backend handle it
       }
-      // ── Proceed with registration ─────────────────────────────────────
       await ridersAPI.addRoute(user.uid, form);
       toast.success('Route added!');
       setModal(null);
-      try { await fetchData(); } catch { /* index may not exist yet, list will refresh on next load */ }
+      try { await fetchData(); } catch { /* index may not exist yet */ }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to add route');
     } finally { setActionLoading(false); }
@@ -1219,7 +1248,6 @@ export default function RoutesAreasPage() {
 
   const deleteRoute = async (routeId) => {
     if (!window.confirm('Delete this route?')) return;
-    // Optimistically remove from UI immediately
     setRoutes(prev => prev.filter(r => (r.id || r.routeId) !== routeId));
     try {
       await ridersAPI.deleteRoute(user.uid, routeId);
@@ -1227,14 +1255,13 @@ export default function RoutesAreasPage() {
       await fetchData();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to delete');
-      await fetchData(); // restore accurate state on error
+      await fetchData();
     }
   };
 
   const addArea = async (form) => {
     setActionLoading(true);
     try {
-      // ── Service Area Pre-validation ───────────────────────────────────
       try {
         const { data: saData } = await serviceAreaAPI.validateArea(
           form.node.latitude,
@@ -1252,11 +1279,10 @@ export default function RoutesAreasPage() {
       } catch {
         // If the validation endpoint fails, let the backend handle it
       }
-      // ── Proceed with registration ─────────────────────────────────────
       await ridersAPI.addArea(user.uid, form);
       toast.success('Area added!');
       setModal(null);
-      try { await fetchData(); } catch { /* index may not exist yet, list will refresh on next load */ }
+      try { await fetchData(); } catch { /* index may not exist yet */ }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to add area');
     } finally { setActionLoading(false); }
@@ -1264,7 +1290,6 @@ export default function RoutesAreasPage() {
 
   const deleteArea = async (areaId) => {
     if (!window.confirm('Delete this area?')) return;
-    // Optimistically remove from UI immediately
     setAreas(prev => prev.filter(a => (a.id || a.areaId) !== areaId));
     try {
       await ridersAPI.deleteArea(user.uid, areaId);
@@ -1272,7 +1297,7 @@ export default function RoutesAreasPage() {
       await fetchData();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to delete');
-      await fetchData(); // restore accurate state on error
+      await fetchData();
     }
   };
 
