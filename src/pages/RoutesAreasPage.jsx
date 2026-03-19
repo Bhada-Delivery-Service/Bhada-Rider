@@ -55,15 +55,32 @@ const DARK_STYLE = [
 function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentColor = '#00e5a0' }) {
   const inputRef = useRef(null);
   const autocompleteRef = useRef(null);
+  const pacContainerRef = useRef(null); // track THIS instance's pac-container
   const [query, setQuery] = useState('');
+  // Use a ref so the listener always calls the latest onPlace without needing re-registration
+  const onPlaceRef = useRef(onPlace);
+  useEffect(() => { onPlaceRef.current = onPlace; }, [onPlace]);
 
   useEffect(() => {
     if (!window.google?.maps?.places || !inputRef.current) return;
     if (autocompleteRef.current) return;
 
+    // Count existing pac-containers before init so we can track ours
+    const beforeCount = document.querySelectorAll('.pac-container').length;
+
     autocompleteRef.current = new window.google.maps.places.Autocomplete(inputRef.current, {
       componentRestrictions: { country: 'in' },
       fields: ['geometry', 'name', 'formatted_address', 'address_components'],
+    });
+
+    // Google appends a new .pac-container to body — grab the latest one as ours
+    requestAnimationFrame(() => {
+      const all = document.querySelectorAll('.pac-container');
+      if (all.length > beforeCount) {
+        pacContainerRef.current = all[all.length - 1];
+        // Ensure it appears above the modal (zIndex 200) and bottom sheet (zIndex 10)
+        pacContainerRef.current.style.zIndex = '9999';
+      }
     });
 
     autocompleteRef.current.addListener('place_changed', () => {
@@ -79,14 +96,18 @@ function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentCol
       const label = sub?.long_name || loc?.long_name || place.name || place.formatted_address?.split(',')[0] || '';
 
       setQuery(place.name || label);
-      onPlace({ lat, lng, label: label || place.name });
+      // Always call the latest onPlace via ref — avoids stale closure bug
+      onPlaceRef.current({ lat, lng, label: label || place.name });
     });
 
     return () => {
-      const pacs = document.querySelectorAll('.pac-container');
-      pacs.forEach(el => el.remove());
+      // Only remove THIS instance's pac-container, not all of them
+      if (pacContainerRef.current) {
+        pacContainerRef.current.remove();
+        pacContainerRef.current = null;
+      }
     };
-  }, [onPlace]);
+  }, []); // run once — onPlace updates are handled via onPlaceRef
 
   return (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -368,14 +389,16 @@ function RouteMapModal({ onClose, onSave, loading }) {
     if (!routeName.trim()) { toast.error('Enter a route name'); return; }
     if (!encodedPolyline) { toast.error('Route encoding not ready yet, please wait'); return; }
 
+    // Convert meters → km before sending to backend
+    // Backend uses distanceTo() which returns km, so thresholds must be in km
     onSave({
       routeName: routeName.trim(),
       encoding: encodedPolyline,
       node1: { latitude: startPoint.lat, longitude: startPoint.lng, label: startPoint.label },
       node2: { latitude: endPoint.lat, longitude: endPoint.lng, label: endPoint.label },
-      threshold1: Number(threshold1),
-      threshold2: Number(threshold2),
-      threshold3: Number(threshold3),
+      threshold1: Number(threshold1) / 1000,
+      threshold2: Number(threshold2) / 1000,
+      threshold3: Number(threshold3) / 1000,
     });
   };
 
