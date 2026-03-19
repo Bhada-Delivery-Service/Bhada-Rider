@@ -479,20 +479,16 @@ function RouteMapModal({ onClose, onSave, loading }) {
         borderRadius: '0 0 20px 20px',
         boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
         transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)',
-        maxHeight: searchOpen ? '500px' : '52px',
+        maxHeight: searchOpen ? '500px' : '72px',
         overflow: 'hidden',
         position: 'relative',
         zIndex: 10,
       }}>
 
-        {/* ── Always-visible drag handle row ── */}
-        <div
-          onClick={() => setSearchOpen(o => !o)}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '14px 16px', cursor: 'pointer', userSelect: 'none', flexShrink: 0,
-          }}
-        >
+        {/* ── Always-visible header: title on top, pill at bottom ── */}
+        <div style={{ flexShrink: 0 }}>
+          {/* Title row */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Search size={15} style={{ color: 'var(--accent)' }} />
             <div>
@@ -524,6 +520,35 @@ function RouteMapModal({ onClose, onSave, loading }) {
             >
               <X size={14} />
             </button>
+          </div>
+          </div>
+          {/* Pill at bottom of header — tap/swipe to open/close */}
+          <div
+            onTouchStart={(e) => { e.currentTarget._startY = e.touches[0].clientY; e.currentTarget._moved = false; }}
+            onTouchMove={(e)  => { e.currentTarget._moved = true; }}
+            onTouchEnd={(e) => {
+              const dy = e.changedTouches[0].clientY - e.currentTarget._startY;
+              if (Math.abs(dy) > 25) setSearchOpen(dy > 0);
+              else if (!e.currentTarget._moved) setSearchOpen(o => !o);
+            }}
+            onClick={() => setSearchOpen(o => !o)}
+            style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              gap: 3, padding: '4px 0 8px', cursor: 'pointer', userSelect: 'none', touchAction: 'pan-x',
+            }}
+          >
+            <span style={{
+              fontSize: 10, lineHeight: 1,
+              color: searchOpen ? 'var(--text-2)' : 'var(--accent)',
+              transition: 'color 0.2s',
+            }}>
+              {searchOpen ? '↑ tap to close' : '↓ tap to open'}
+            </span>
+            <div style={{
+              width: 40, height: 4, borderRadius: 2,
+              background: searchOpen ? 'rgba(255,255,255,0.35)' : 'var(--accent)',
+              transition: 'background 0.2s',
+            }} />
           </div>
         </div>
 
@@ -597,37 +622,8 @@ function RouteMapModal({ onClose, onSave, loading }) {
             </div>
           )}
         </div>
-      </div>
 
-      {/* ── Toggle pill — floats below top sheet ── */}
-      <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0, zIndex: 9, marginTop: -1 }}>
-        <button
-          onClick={() => setSearchOpen(o => !o)}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            background: 'var(--bg-3)',
-            border: '1px solid var(--border-bright)',
-            borderTop: 'none',
-            borderRadius: '0 0 20px 20px',
-            padding: '5px 18px 7px',
-            cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-          }}
-        >
-          <div style={{
-            width: 32, height: 4, borderRadius: 2,
-            background: searchOpen ? 'rgba(255,255,255,0.4)' : 'var(--accent)',
-            transition: 'background 0.2s',
-          }} />
-          <span style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
-            fontFamily: 'var(--font-mono)',
-            color: searchOpen ? 'var(--text-2)' : 'var(--accent)',
-            transition: 'color 0.2s',
-          }}>
-            {searchOpen ? '▲ HIDE' : '▼ SEARCH'}
-          </span>
-        </button>
+
       </div>
 
       {/* ── Middle: Map ── */}
@@ -703,14 +699,14 @@ function RouteMapModal({ onClose, onSave, loading }) {
         )}
       </div>
 
-      {/* ── Bottom Sheet — zIndex: 10 so it sits above all map overlays ── */}
+      {/* ── Bottom Sheet — swipe up/down to open/close ── */}
       <div style={{
         flexShrink: 0,
         background: 'var(--bg-1)',
         borderTop: '3px solid var(--accent)',
         borderRadius: '20px 20px 0 0',
         boxShadow: '0 -8px 32px rgba(0,0,0,0.7)',
-        transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)',
+        transition: sheetOpen ? 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)' : 'max-height 0.3s cubic-bezier(0.4,0,0.2,1)',
         maxHeight: sheetOpen ? '60vh' : '48px',
         display: 'flex',
         flexDirection: 'column',
@@ -718,28 +714,34 @@ function RouteMapModal({ onClose, onSave, loading }) {
         position: 'relative',
         zIndex: 10,
       }}>
-        {/* Drag handle — tap to toggle */}
+        {/* ── Swipe + Click handle ── */}
         <div
-          onClick={() => setSheetOpen(o => !o)}
+          onTouchStart={(e) => { e.currentTarget._startY = e.touches[0].clientY; e.currentTarget._moved = false; }}
+          onTouchMove={(e)  => { e.currentTarget._moved = true; }}
+          onTouchEnd={(e) => {
+            const dy = e.changedTouches[0].clientY - e.currentTarget._startY;
+            if (Math.abs(dy) > 25) setSheetOpen(dy < 0); // swipe gesture
+            else if (!e.currentTarget._moved) setSheetOpen(o => !o); // short tap = toggle
+          }}
+          onClick={() => setSheetOpen(o => !o)} // mouse click on desktop
           style={{
-            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
             padding: '10px 16px 8px', flexShrink: 0, cursor: 'pointer',
-            userSelect: 'none', gap: 8,
+            userSelect: 'none', gap: 5, touchAction: 'pan-x',
           }}
         >
           <div style={{
-            width: 40, height: 5, borderRadius: 3,
-            background: sheetOpen ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.35)',
+            width: 40, height: 4, borderRadius: 2,
+            background: sheetOpen ? 'rgba(255,255,255,0.45)' : 'var(--accent)',
             transition: 'background 0.2s',
           }} />
-          {!sheetOpen && (
-            <span style={{
-              fontSize: 11, color: 'var(--text-2)', fontWeight: 600,
-              letterSpacing: '0.06em', fontFamily: 'var(--font-mono)',
-            }}>
-              ROUTE DETAILS ↑
-            </span>
-          )}
+          <span style={{
+            fontSize: 11, lineHeight: 1,
+            color: sheetOpen ? 'var(--text-2)' : 'var(--accent)',
+            transition: 'color 0.2s',
+          }}>
+            {sheetOpen ? '↓ swipe or tap to close' : '↑ swipe or tap to open'}
+          </span>
         </div>
 
         {/* Scrollable form — only visible when open */}
@@ -1025,37 +1027,6 @@ function AreaMapModal({ onClose, onSave, loading }) {
         )}
       </div>
 
-      {/* ── Toggle pill — floats below top sheet ── */}
-      <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0, zIndex: 9, marginTop: -1 }}>
-        <button
-          onClick={() => setSearchOpen(o => !o)}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            background: 'var(--bg-3)',
-            border: '1px solid var(--border-bright)',
-            borderTop: 'none',
-            borderRadius: '0 0 20px 20px',
-            padding: '5px 18px 7px',
-            cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-          }}
-        >
-          <div style={{
-            width: 32, height: 4, borderRadius: 2,
-            background: searchOpen ? 'rgba(255,255,255,0.4)' : 'var(--accent)',
-            transition: 'background 0.2s',
-          }} />
-          <span style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
-            fontFamily: 'var(--font-mono)',
-            color: searchOpen ? 'var(--text-2)' : 'var(--accent)',
-            transition: 'color 0.2s',
-          }}>
-            {searchOpen ? '▲ HIDE' : '▼ SEARCH'}
-          </span>
-        </button>
-      </div>
-
       {/* ── Middle: Map ── */}
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
         {!MAPS_API_KEY ? (
@@ -1104,7 +1075,7 @@ function AreaMapModal({ onClose, onSave, loading }) {
         )}
       </div>
 
-      {/* ── Bottom Sheet — zIndex: 10 so it sits above all map overlays ── */}
+      {/* ── Bottom Sheet — swipe up/down to open/close ── */}
       <div style={{
         flexShrink: 0,
         background: 'var(--bg-1)',
@@ -1119,28 +1090,34 @@ function AreaMapModal({ onClose, onSave, loading }) {
         position: 'relative',
         zIndex: 10,
       }}>
-        {/* Drag handle — tap to toggle */}
+        {/* ── Swipe + Click handle ── */}
         <div
+          onTouchStart={(e) => { e.currentTarget._startY = e.touches[0].clientY; e.currentTarget._moved = false; }}
+          onTouchMove={(e)  => { e.currentTarget._moved = true; }}
+          onTouchEnd={(e) => {
+            const dy = e.changedTouches[0].clientY - e.currentTarget._startY;
+            if (Math.abs(dy) > 25) setSheetOpen(dy < 0);
+            else if (!e.currentTarget._moved) setSheetOpen(o => !o);
+          }}
           onClick={() => setSheetOpen(o => !o)}
           style={{
-            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
             padding: '10px 16px 8px', flexShrink: 0, cursor: 'pointer',
-            userSelect: 'none', gap: 8,
+            userSelect: 'none', gap: 5, touchAction: 'pan-x',
           }}
         >
           <div style={{
-            width: 40, height: 5, borderRadius: 3,
-            background: sheetOpen ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.35)',
+            width: 40, height: 4, borderRadius: 2,
+            background: sheetOpen ? 'rgba(255,255,255,0.45)' : 'var(--blue)',
             transition: 'background 0.2s',
           }} />
-          {!sheetOpen && (
-            <span style={{
-              fontSize: 11, color: 'var(--text-2)', fontWeight: 600,
-              letterSpacing: '0.06em', fontFamily: 'var(--font-mono)',
-            }}>
-              AREA DETAILS ↑
-            </span>
-          )}
+          <span style={{
+            fontSize: 11, lineHeight: 1,
+            color: sheetOpen ? 'var(--text-2)' : 'var(--blue)',
+            transition: 'color 0.2s',
+          }}>
+            {sheetOpen ? '↓ swipe or tap to close' : '↑ swipe or tap to open'}
+          </span>
         </div>
 
         {/* Scrollable form — only visible when open */}
