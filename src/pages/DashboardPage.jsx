@@ -106,6 +106,7 @@ export default function DashboardPage() {
   const STATUS_CONFIG = getStatusConfig(t);
   const statusCfg   = STATUS_CONFIG[currentStatus] || STATUS_CONFIG.OFFLINE;
   const notApproved = riderData && riderData.onboardingStatus !== 'APPROVED';
+  const isBlocked   = currentStatus === 'BLOCKED' || riderData?.status === 'BLOCKED';
   const userName    = riderData?.firstName || 'Rider';
 
   if (loading) return <div className="page-enter"><SkeletonDashboard /></div>;
@@ -121,6 +122,43 @@ export default function DashboardPage() {
           display: 'flex', alignItems: 'center', gap: 8,
         }}>
           {t('no_internet')}
+        </div>
+      )}
+
+      {/* Blocked rider banner — persistent, above everything */}
+      {isBlocked && (
+        <div style={{
+          padding: '14px 16px',
+          marginBottom: 14,
+          borderRadius: 'var(--r-md)',
+          background: 'rgba(220,38,38,0.10)',
+          border: '1.5px solid rgba(220,38,38,0.45)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 22 }}>🚫</span>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#ff4d6d', letterSpacing: '-0.02em' }}>
+                Account Block Hai
+              </div>
+              <div style={{ fontSize: 12, color: '#000000', marginTop: 3, lineHeight: 1.5 }}>
+                Aapka rider account block kar diya gaya hai. Aap abhi orders accept nahi kar sakte.
+              </div>
+            </div>
+          </div>
+          <div style={{
+            fontSize: 11,
+            color: '#ff8fa3',
+            padding: '8px 12px',
+            background: 'rgba(220,38,38,0.08)',
+            borderRadius: 8,
+            fontFamily: 'var(--font-mono)',
+            lineHeight: 1.55,
+          }}>
+            📞 Support se contact karein ya admin se baat karein apna account unblock karwane ke liye.
+          </div>
         </div>
       )}
 
@@ -179,7 +217,7 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          {!notApproved && (
+          {!notApproved && !isBlocked && (
             <div className="flex gap-6">
               {currentStatus === 'OFFLINE' && (
                 <button className="btn btn-primary btn-sm" onClick={() => changeStatus('online')} disabled={loadingStatus}>
@@ -256,7 +294,7 @@ export default function DashboardPage() {
       </div>
 
       <PerformanceSection performance={performance} t={t} />
-      {isOnline && <AvailableOrdersSection orders={placedOrders} t={t} />}
+      {isOnline && !isBlocked && <AvailableOrdersSection orders={placedOrders} t={t} />}
 
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}`}</style>
     </div>

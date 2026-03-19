@@ -255,6 +255,7 @@ export default function OrderDetailPage() {
   const [showQr, setShowQr]         = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [blockedError, setBlockedError] = useState(null); // banner shown when rider is blocked/inactive
   const { guard, anyLoading: actionLoading } = useActionGuard();
   const { markOrderAccepted } = useNotifications();
 
@@ -383,8 +384,21 @@ export default function OrderDetailPage() {
       // Silent background refresh to confirm server state (no skeleton flash)
       await refreshOrder();
     }, action).catch(err => {
-      toast.error(err.response?.data?.message || err.message || 'Action failed');
-      log.error(`order_${action} failed`, err);
+      // Extract the most specific message from the response
+      const data = err.response?.data;
+      const msg  = data?.message
+                || data?.error
+                || data?.details
+                || (typeof data === 'string' ? data : null)
+                || err.message
+                || 'Action failed';
+      log.error(`order_${action} failed`, { msg, status: err.response?.status, data });
+      // Blocked / inactive rider — show a persistent banner instead of a toast
+      if (action === 'accept' && /blocked|inactive/i.test(msg)) {
+        setBlockedError(msg);
+      } else {
+        toast.error(msg, { duration: 5000 });
+      }
     });
   };
 
@@ -716,6 +730,40 @@ export default function OrderDetailPage() {
         ))}
       </div>
 
+      {/* ── Blocked rider banner — in page flow, above sticky bar ── */}
+      {blockedError && status === 'PLACED' && !order?.assignedRiderId && (
+        <div style={{
+          margin: '0 0 12px 0',
+          padding: '12px 14px',
+          borderRadius: 12,
+          background: 'rgba(220,38,38,0.10)',
+          border: '1.5px solid rgba(220,38,38,0.45)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 18 }}>🚫</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#ff4d6d' }}>
+              Order Accept Nahi Ho Sakta
+            </span>
+          </div>
+          <div style={{ fontSize: 12, color: '#000000', lineHeight: 1.55, paddingLeft: 26 }}>
+            Aapka account <strong style={{ color: '#ff4d6d' }}>block</strong> hai ya inactive hai.
+            Naye orders accept karne ke liye admin se contact karein.
+          </div>
+          <div style={{
+            marginTop: 2,
+            paddingLeft: 26,
+            fontSize: 11,
+            color: 'rgba(255,77,109,0.6)',
+            fontFamily: 'var(--font-mono)',
+          }}>
+            {blockedError}
+          </div>
+        </div>
+      )}
+
       {/* Bottom padding for sticky bar */}
       <div style={{ height: 90 }} />
 
@@ -780,12 +828,14 @@ export default function OrderDetailPage() {
       {!showDeliver && !showCancel && (
         <div className="sticky-action-bar">
           {status === 'PLACED' && !order?.assignedRiderId && (
-            <>
-              <button className="btn btn-primary" style={{ flex: 1 }} disabled={actionLoading} onClick={() => handleAction('accept')}>
-                <Truck size={15} /> Accept Order
-              </button>
-            
-            </> 
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1, opacity: blockedError ? 0.45 : 1 }}
+              disabled={actionLoading || !!blockedError}
+              onClick={() => { setBlockedError(null); handleAction('accept'); }}
+            >
+              <Truck size={15} /> Accept Order
+            </button>
           )}
           {status === 'PLACED' && order?.assignedRiderId && (
             // Rider accepted — waiting for sender to mark package ready
