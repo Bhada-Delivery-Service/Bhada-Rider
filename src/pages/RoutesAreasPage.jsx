@@ -52,20 +52,18 @@ const DARK_STYLE = [
 ];
 
 /* ─── Reusable Place Search Box ──────────────────────────────────────────── */
-function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentColor = '#00e5a0' }) {
+function PlaceSearchBox({ onPreview, placeholder = 'Search location…', accentColor = '#00e5a0' }) {
   const inputRef = useRef(null);
   const autocompleteRef = useRef(null);
-  const pacContainerRef = useRef(null); // track THIS instance's pac-container
+  const pacContainerRef = useRef(null);
   const [query, setQuery] = useState('');
-  // Use a ref so the listener always calls the latest onPlace without needing re-registration
-  const onPlaceRef = useRef(onPlace);
-  useEffect(() => { onPlaceRef.current = onPlace; }, [onPlace]);
+  const onPreviewRef = useRef(onPreview);
+  useEffect(() => { onPreviewRef.current = onPreview; }, [onPreview]);
 
   useEffect(() => {
     if (!window.google?.maps?.places || !inputRef.current) return;
     if (autocompleteRef.current) return;
 
-    // Count existing pac-containers before init so we can track ours
     const beforeCount = document.querySelectorAll('.pac-container').length;
 
     autocompleteRef.current = new window.google.maps.places.Autocomplete(inputRef.current, {
@@ -73,12 +71,10 @@ function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentCol
       fields: ['geometry', 'name', 'formatted_address', 'address_components'],
     });
 
-    // Google appends a new .pac-container to body — grab the latest one as ours
     requestAnimationFrame(() => {
       const all = document.querySelectorAll('.pac-container');
       if (all.length > beforeCount) {
         pacContainerRef.current = all[all.length - 1];
-        // Ensure it appears above the modal (zIndex 200) and bottom sheet (zIndex 10)
         pacContainerRef.current.style.zIndex = '9999';
       }
     });
@@ -89,25 +85,29 @@ function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentCol
 
       const lat = place.geometry.location.lat();
       const lng = place.geometry.location.lng();
-
       const comps = place.address_components || [];
       const sub = comps.find(c => c.types.includes('sublocality_level_1') || c.types.includes('sublocality'));
       const loc = comps.find(c => c.types.includes('locality'));
       const label = sub?.long_name || loc?.long_name || place.name || place.formatted_address?.split(',')[0] || '';
+      const fullAddress = place.formatted_address || label;
 
       setQuery(place.name || label);
-      // Always call the latest onPlace via ref — avoids stale closure bug
-      onPlaceRef.current({ lat, lng, label: label || place.name });
+      // Send to parent for preview (confirmation) — NOT direct placement
+      onPreviewRef.current({ lat, lng, label: label || place.name, fullAddress });
     });
 
     return () => {
-      // Only remove THIS instance's pac-container, not all of them
       if (pacContainerRef.current) {
         pacContainerRef.current.remove();
         pacContainerRef.current = null;
       }
     };
-  }, []); // run once — onPlace updates are handled via onPlaceRef
+  }, []);
+
+  const handleClear = () => {
+    setQuery('');
+    if (inputRef.current) inputRef.current.focus();
+  };
 
   return (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -124,7 +124,7 @@ function PlaceSearchBox({ onPlace, placeholder = 'Search location…', accentCol
       />
       {query && (
         <button
-          onClick={() => setQuery('')}
+          onClick={handleClear}
           style={{ position: 'absolute', right: 8, background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}
         >
           <X size={13} />
@@ -155,23 +155,83 @@ function RouteMapModal({ onClose, onSave, loading }) {
   const [locating, setLocating] = useState(false);
   const [encodedPolyline, setEncodedPolyline] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(true); // top sheet open by default
+  // Preview state — holds a candidate point waiting for user confirmation
+  const [preview, setPreview] = useState(null); // { lat, lng, label, fullAddress, type }
+  const previewMarkerRef = useRef(null);
   const geocoder = useRef(null);
   const directionsService = useRef(null);
 
-  const handleSearchPlace = useCallback((point, type) => {
+  // Called when user selects a search suggestion — shows preview, waits for confirm
+  const handlePreviewPlace = useCallback((point, type) => {
     if (!mapInstance.current) return;
+
+    // Remove any existing preview marker
+    if (previewMarkerRef.current) {
+      previewMarkerRef.current.setMap(null);
+      previewMarkerRef.current = null;
+    }
+
+    // Pan map to the candidate location
     mapInstance.current.setCenter({ lat: point.lat, lng: point.lng });
     mapInstance.current.setZoom(15);
-    placeMarker(point.lat, point.lng, type, point.label);
-    if (type === 'start') {
-      setStartPoint(point);
+
+    // Place a pulsing/dashed preview marker (different style from confirmed markers)
+    const isStart = type === 'start';
+    const color = isStart ? '#00e5a0' : '#ff4d6d';
+    previewMarkerRef.current = new window.google.maps.Marker({
+      position: { lat: point.lat, lng: point.lng },
+      map: mapInstance.current,
+      title: point.label,
+      icon: {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: 12,
+        fillColor: color,
+        fillOpacity: 0.3,        // semi-transparent = "not confirmed yet"
+        strokeColor: color,
+        strokeWeight: 3,
+        strokeOpacity: 1,
+      },
+      zIndex: 999,
+    });
+
+    // Show confirmation banner
+    setPreview({ ...point, type });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // User tapped Confirm — accept the previewed point
+  const handleConfirmPreview = useCallback(() => {
+    if (!preview) return;
+
+    // Remove preview marker
+    if (previewMarkerRef.current) {
+      previewMarkerRef.current.setMap(null);
+      previewMarkerRef.current = null;
+    }
+
+    // Place the real confirmed marker
+    placeMarker(preview.lat, preview.lng, preview.type, preview.label);
+
+    if (preview.type === 'start') {
+      setStartPoint(preview);
       setStep(endPoint ? 'confirm' : 'end');
     } else {
-      setEndPoint(point);
+      setEndPoint(preview);
       setStep('confirm');
     }
+    setPreview(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endPoint]);
+  }, [preview, endPoint]);
+
+  // User tapped Cancel — discard the preview
+  const handleCancelPreview = useCallback(() => {
+    if (previewMarkerRef.current) {
+      previewMarkerRef.current.setMap(null);
+      previewMarkerRef.current = null;
+    }
+    setPreview(null);
+  }, []);
 
   useEffect(() => {
     if (!MAPS_API_KEY) return;
@@ -411,31 +471,163 @@ function RouteMapModal({ onClose, onSave, loading }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', flexDirection: 'column', background: '#05080f' }}>
 
-      {/* ── Top: Search header ── */}
-      <div style={{ flexShrink: 0, background: 'var(--bg-1)', borderBottom: '1px solid var(--border)', padding: '12px 16px 14px', zIndex: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div>
-            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16 }}>Add Route</div>
-            <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
-              {fetchingRoute ? '🔄 Calculating road route…' : stepMsg[step]}
+      {/* ── Top Sheet: Collapsible search ── */}
+      <div style={{
+        flexShrink: 0,
+        background: 'var(--bg-1)',
+        borderBottom: '3px solid var(--accent)',
+        borderRadius: '0 0 20px 20px',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+        transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)',
+        maxHeight: searchOpen ? '500px' : '52px',
+        overflow: 'hidden',
+        position: 'relative',
+        zIndex: 10,
+      }}>
+
+        {/* ── Always-visible drag handle row ── */}
+        <div
+          onClick={() => setSearchOpen(o => !o)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '14px 16px', cursor: 'pointer', userSelect: 'none', flexShrink: 0,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Search size={15} style={{ color: 'var(--accent)' }} />
+            <div>
+              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, lineHeight: 1 }}>
+                {searchOpen ? 'Search Points' : (
+                  startPoint && endPoint
+                    ? `${startPoint.label} → ${endPoint.label}`
+                    : startPoint
+                      ? `🟢 ${startPoint.label} · tap to set end`
+                      : '📍 Search start & end points'
+                )}
+              </div>
+              {!searchOpen && (
+                <div style={{ fontSize: 10, color: 'var(--text-2)', marginTop: 2 }}>
+                  {fetchingRoute ? '🔄 Calculating…' : stepMsg[step]}
+                </div>
+              )}
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border)', color: 'var(--text-1)', cursor: 'pointer', padding: 8, borderRadius: 8, display: 'flex' }}>
-            <X size={16} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{
+              width: 28, height: 5, borderRadius: 3,
+              background: searchOpen ? 'rgba(255,255,255,0.5)' : 'var(--accent)',
+              transition: 'background 0.2s',
+            }} />
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(); }}
+              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border)', color: 'var(--text-1)', cursor: 'pointer', padding: 6, borderRadius: 8, display: 'flex' }}
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
-        {mapsReady && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div>
-              <div style={{ fontSize: 10, color: '#00e5a0', fontFamily: 'var(--font-mono)', fontWeight: 700, marginBottom: 4, letterSpacing: '0.06em' }}>🟢 START POINT</div>
-              <PlaceSearchBox placeholder="Search start location…" accentColor="#00e5a0" onPlace={(p) => handleSearchPlace(p, 'start')} />
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: '#ff4d6d', fontFamily: 'var(--font-mono)', fontWeight: 700, marginBottom: 4, letterSpacing: '0.06em' }}>🔴 END POINT</div>
-              <PlaceSearchBox placeholder="Search end location…" accentColor="#ff4d6d" onPlace={(p) => handleSearchPlace(p, 'end')} />
-            </div>
+
+        {/* ── Expanded content ── */}
+        <div style={{ padding: '0 16px 14px', overflow: 'hidden' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 10 }}>
+            {fetchingRoute ? '🔄 Calculating road route…' : stepMsg[step]}
           </div>
-        )}
+
+          {mapsReady && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 10, color: '#00e5a0', fontFamily: 'var(--font-mono)', fontWeight: 700, marginBottom: 4, letterSpacing: '0.06em' }}>
+                  🟢 START POINT {startPoint && <span style={{ opacity: 0.7 }}>✓ {startPoint.label}</span>}
+                </div>
+                <PlaceSearchBox placeholder="Search start location…" accentColor="#00e5a0" onPreview={(p) => handlePreviewPlace(p, 'start')} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: '#ff4d6d', fontFamily: 'var(--font-mono)', fontWeight: 700, marginBottom: 4, letterSpacing: '0.06em' }}>
+                  🔴 END POINT {endPoint && <span style={{ opacity: 0.7 }}>✓ {endPoint.label}</span>}
+                </div>
+                <PlaceSearchBox placeholder="Search end location…" accentColor="#ff4d6d" onPreview={(p) => handlePreviewPlace(p, 'end')} />
+              </div>
+            </div>
+          )}
+
+          {/* ── Preview confirmation banner ── */}
+          {preview && (
+            <div style={{
+              marginTop: 10,
+              background: 'rgba(13,18,32,0.97)',
+              border: `1.5px solid ${preview.type === 'start' ? '#00e5a0' : '#ff4d6d'}`,
+              borderRadius: 12,
+              padding: '10px 12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <span style={{
+                  width: 10, height: 10, borderRadius: '50%', flexShrink: 0, marginTop: 3,
+                  background: preview.type === 'start' ? '#00e5a0' : '#ff4d6d',
+                  opacity: 0.6, display: 'inline-block',
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: preview.type === 'start' ? '#00e5a0' : '#ff4d6d', marginBottom: 2 }}>
+                    {preview.type === 'start' ? 'Set as Start Point?' : 'Set as End Point?'}
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-0)', fontWeight: 600, marginBottom: 2 }}>{preview.label}</div>
+                  {preview.fullAddress && preview.fullAddress !== preview.label && (
+                    <div style={{ fontSize: 11, color: 'var(--text-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {preview.fullAddress}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                    {preview.lat.toFixed(5)}, {preview.lng.toFixed(5)}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={handleCancelPreview} style={{
+                  flex: 1, padding: '8px 0', borderRadius: 8, border: '1px solid var(--border-bright)',
+                  background: 'transparent', color: 'var(--text-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                }}>✕ Cancel</button>
+                <button onClick={() => { handleConfirmPreview(); setSearchOpen(false); }} style={{
+                  flex: 2, padding: '8px 0', borderRadius: 8, border: 'none',
+                  background: preview.type === 'start' ? '#00e5a0' : '#ff4d6d',
+                  color: '#000', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                }}>✓ Confirm {preview.type === 'start' ? 'Start' : 'End'} Point</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Toggle pill — floats below top sheet ── */}
+      <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0, zIndex: 9, marginTop: -1 }}>
+        <button
+          onClick={() => setSearchOpen(o => !o)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'var(--bg-3)',
+            border: '1px solid var(--border-bright)',
+            borderTop: 'none',
+            borderRadius: '0 0 20px 20px',
+            padding: '5px 18px 7px',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          }}
+        >
+          <div style={{
+            width: 32, height: 4, borderRadius: 2,
+            background: searchOpen ? 'rgba(255,255,255,0.4)' : 'var(--accent)',
+            transition: 'background 0.2s',
+          }} />
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+            fontFamily: 'var(--font-mono)',
+            color: searchOpen ? 'var(--text-2)' : 'var(--accent)',
+            transition: 'color 0.2s',
+          }}>
+            {searchOpen ? '▲ HIDE' : '▼ SEARCH'}
+          </span>
+        </button>
       </div>
 
       {/* ── Middle: Map ── */}
@@ -632,12 +824,57 @@ function AreaMapModal({ onClose, onSave, loading }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const geocoder = useRef(null);
 
-  const handleSearchPlace = useCallback((point) => {
+  const [preview, setPreview] = useState(null);
+  const previewMarkerRef = useRef(null);
+
+  const handlePreviewPlace = useCallback((point) => {
     if (!mapInstance.current) return;
+
+    if (previewMarkerRef.current) {
+      previewMarkerRef.current.setMap(null);
+      previewMarkerRef.current = null;
+    }
+
     mapInstance.current.setCenter({ lat: point.lat, lng: point.lng });
     mapInstance.current.setZoom(14);
-    placeCenter(point.lat, point.lng, point.label);
+
+    previewMarkerRef.current = new window.google.maps.Marker({
+      position: { lat: point.lat, lng: point.lng },
+      map: mapInstance.current,
+      title: point.label,
+      icon: {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: 12,
+        fillColor: '#4d9fff',
+        fillOpacity: 0.3,
+        strokeColor: '#4d9fff',
+        strokeWeight: 3,
+        strokeOpacity: 1,
+      },
+      zIndex: 999,
+    });
+
+    setPreview(point);
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleConfirmPreview = useCallback(() => {
+    if (!preview) return;
+    if (previewMarkerRef.current) {
+      previewMarkerRef.current.setMap(null);
+      previewMarkerRef.current = null;
+    }
+    placeCenter(preview.lat, preview.lng, preview.label);
+    setPreview(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview]);
+
+  const handleCancelPreview = useCallback(() => {
+    if (previewMarkerRef.current) {
+      previewMarkerRef.current.setMap(null);
+      previewMarkerRef.current = null;
+    }
+    setPreview(null);
   }, []);
 
   useEffect(() => {
@@ -746,8 +983,77 @@ function AreaMapModal({ onClose, onSave, loading }) {
           </button>
         </div>
         {mapsReady && (
-          <PlaceSearchBox placeholder="Search area location…" accentColor="#4d9fff" onPlace={handleSearchPlace} />
+          <PlaceSearchBox placeholder="Search area location…" accentColor="#4d9fff" onPreview={handlePreviewPlace} />
         )}
+
+        {/* ── Area preview confirmation banner ── */}
+        {preview && (
+          <div style={{
+            marginTop: 10,
+            background: 'rgba(13,18,32,0.97)',
+            border: '1.5px solid #4d9fff',
+            borderRadius: 12,
+            padding: '10px 12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#4d9fff', opacity: 0.6, flexShrink: 0, marginTop: 3, display: 'inline-block' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#4d9fff', marginBottom: 2 }}>Set as Area Center?</div>
+                <div style={{ fontSize: 13, color: 'var(--text-0)', fontWeight: 600, marginBottom: 2 }}>{preview.label}</div>
+                {preview.fullAddress && preview.fullAddress !== preview.label && (
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{preview.fullAddress}</div>
+                )}
+                <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                  {preview.lat.toFixed(5)}, {preview.lng.toFixed(5)}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={handleCancelPreview}
+                style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: '1px solid var(--border-bright)', background: 'transparent', color: 'var(--text-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                ✕ Cancel
+              </button>
+              <button onClick={handleConfirmPreview}
+                style={{ flex: 2, padding: '8px 0', borderRadius: 8, border: 'none', background: '#4d9fff', color: '#000', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                ✓ Confirm Area Center
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Toggle pill — floats below top sheet ── */}
+      <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0, zIndex: 9, marginTop: -1 }}>
+        <button
+          onClick={() => setSearchOpen(o => !o)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'var(--bg-3)',
+            border: '1px solid var(--border-bright)',
+            borderTop: 'none',
+            borderRadius: '0 0 20px 20px',
+            padding: '5px 18px 7px',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          }}
+        >
+          <div style={{
+            width: 32, height: 4, borderRadius: 2,
+            background: searchOpen ? 'rgba(255,255,255,0.4)' : 'var(--accent)',
+            transition: 'background 0.2s',
+          }} />
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+            fontFamily: 'var(--font-mono)',
+            color: searchOpen ? 'var(--text-2)' : 'var(--accent)',
+            transition: 'color 0.2s',
+          }}>
+            {searchOpen ? '▲ HIDE' : '▼ SEARCH'}
+          </span>
+        </button>
       </div>
 
       {/* ── Middle: Map ── */}
