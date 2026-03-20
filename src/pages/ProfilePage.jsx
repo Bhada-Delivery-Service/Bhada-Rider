@@ -713,4 +713,4 @@ export default function ProfilePage() {
       {modal === 'bank' && <BankAccountModal uid={user.uid} riderData={rd} onClose={() => setModal(null)} onSave={fetchRider} />}
     </div>
   );
-} 
+}   
