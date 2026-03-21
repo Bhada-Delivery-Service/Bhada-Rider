@@ -1,13 +1,13 @@
-import React, { useState, memo } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, RefreshCw, ChevronRight } from 'lucide-react';
+import { Package, RefreshCw } from 'lucide-react';
 import { useOrders }         from '../hooks/useOrders';
 import OrderCard             from '../components/order/OrderCard';
 import { SkeletonOrderCard } from '../components/ui/SkeletonLoader';
 
 const TABS = [
-  { key: 'available',  label: 'Available',  icon: '🆕', statuses: ['PLACED'] },
-  { key: 'dispatched', label: 'Active',      icon: '🚴', statuses: ['DISPATCHED', 'READY'] },
+  { key: 'available',  label: 'Available', icon: '🆕' },
+  { key: 'active',     label: 'Active',    icon: '🚴' },
 ];
 
 const TabBar = memo(function TabBar({ tab, onSelect, counts }) {
@@ -59,12 +59,25 @@ export default function OrdersPage() {
 
   const { availableOrders, myOrders, loading, refreshing, refetch } = useOrders();
 
-  const tabOrders = {
-    available:  availableOrders.filter(o => o.status === 'PLACED'),
-    dispatched: myOrders.filter(o => ['DISPATCHED', 'READY'].includes(o.status)),
-  };
+  // Available: PLACED orders with NO assignedRiderId (not yet taken by anyone)
+  const available = availableOrders.filter(o =>
+    o.status === 'PLACED' && !o.assignedRiderId
+  );
 
-  const filtered  = tabOrders[tab] || [];
+  // Active: all orders assigned to this rider regardless of status
+  // Includes PLACED+assignedRiderId (waiting for sender), READY, DISPATCHED
+  const active = myOrders.filter(o =>
+    ['PLACED', 'READY', 'DISPATCHED'].includes(o.status)
+  );
+
+  const filtered = tab === 'available' ? available : active;
+
+  // Auto-switch to Active tab when rider accepts an order
+  useEffect(() => {
+    if (active.length > 0 && tab === 'available' && available.length === 0) {
+      setTab('active');
+    }
+  }, [active.length, available.length]);
 
   return (
     <div className="page-enter">
@@ -92,7 +105,11 @@ export default function OrdersPage() {
         </button>
       </div>
 
-      <TabBar tab={tab} onSelect={setTab} counts={{ available: tabOrders.available.length, dispatched: tabOrders.dispatched.length }} />
+      <TabBar
+        tab={tab}
+        onSelect={setTab}
+        counts={{ available: available.length, active: active.length }}
+      />
 
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -104,13 +121,23 @@ export default function OrdersPage() {
             <Package size={22} style={{ color: 'var(--text-2)' }} />
           </div>
           <h3>{tab === 'available' ? 'No orders available' : 'No active deliveries'}</h3>
-          <p>{tab === 'available' ? 'Go online to receive new orders' : 'Accept an order to see it here'}</p>
+          <p>
+            {tab === 'available'
+              ? 'Go online to receive new orders'
+              : 'Accept an order to see it here'}
+          </p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {filtered.map(order => {
             const id = order.orderId || order.id;
-            return <OrderCard key={id} order={order} onClick={() => navigate(`/orders/${id}`)} />;
+            return (
+              <OrderCard
+                key={id}
+                order={order}
+                onClick={() => navigate(`/orders/${id}`)}
+              />
+            );
           })}
         </div>
       )}

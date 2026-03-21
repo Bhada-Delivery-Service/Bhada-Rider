@@ -47,22 +47,22 @@ function PickupCountdownTimer({ order }) {
   if (order.status !== 'READY') return null;
   if (!startTime || timeLeft === null) return null;
 
-  const expired  = timeLeft <= 0;
+  const expired = timeLeft <= 0;
   const critical = !expired && timeLeft < 15 * 60 * 1000;
-  const warning  = !expired && !critical && timeLeft < 30 * 60 * 1000;
+  const warning = !expired && !critical && timeLeft < 30 * 60 * 1000;
 
   const totalSecs = Math.max(0, Math.floor(timeLeft / 1000));
-  const hrs  = Math.floor(totalSecs / 3600);
+  const hrs = Math.floor(totalSecs / 3600);
   const mins = Math.floor((totalSecs % 3600) / 60);
   const secs = totalSecs % 60;
-  const pad  = n => String(n).padStart(2, '0');
-  const pct  = Math.max(0, Math.min(100, (timeLeft / PICKUP_WINDOW_MS) * 100));
+  const pad = n => String(n).padStart(2, '0');
+  const pct = Math.max(0, Math.min(100, (timeLeft / PICKUP_WINDOW_MS) * 100));
 
-  const color       = expired || critical ? '#FF4757' : warning ? '#FF8C42' : '#00e5a0';
-  const bgColor     = expired || critical ? 'rgba(255,71,87,0.08)' : warning ? 'rgba(255,140,66,0.08)' : 'rgba(0,229,160,0.06)';
+  const color = expired || critical ? '#FF4757' : warning ? '#FF8C42' : '#00e5a0';
+  const bgColor = expired || critical ? 'rgba(255,71,87,0.08)' : warning ? 'rgba(255,140,66,0.08)' : 'rgba(0,229,160,0.06)';
   const borderColor = expired || critical ? 'rgba(255,71,87,0.35)' : warning ? 'rgba(255,140,66,0.35)' : 'rgba(0,229,160,0.2)';
 
-  const R    = 28;
+  const R = 28;
   const CIRC = 2 * Math.PI * R;
   const dash = (pct / 100) * CIRC;
 
@@ -142,7 +142,7 @@ function OrderMap({ order }) {
     if (!pLat || !pLng || !dLat || !dLng) return;
     loadGoogleMaps().then(maps => {
       const pickupPos = { lat: pLat, lng: pLng };
-      const dropPos   = { lat: dLat, lng: dLng };
+      const dropPos = { lat: dLat, lng: dLng };
       const map = new maps.Map(mapRef.current, {
         zoom: 13, center: pickupPos, disableDefaultUI: true, zoomControl: true,
         styles: [
@@ -155,16 +155,19 @@ function OrderMap({ order }) {
           { featureType: 'poi', stylers: [{ visibility: 'off' }] },
         ],
       });
-      new maps.Marker({ position: pickupPos, map, title: 'Pickup',
+      new maps.Marker({
+        position: pickupPos, map, title: 'Pickup',
         icon: { path: maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#00e5a0', fillOpacity: 1, strokeColor: '#131929', strokeWeight: 2 },
         label: { text: 'P', color: '#131929', fontSize: '10px', fontWeight: 'bold' },
       });
-      new maps.Marker({ position: dropPos, map, title: 'Drop',
+      new maps.Marker({
+        position: dropPos, map, title: 'Drop',
         icon: { path: maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#ff4d6d', fillOpacity: 1, strokeColor: '#131929', strokeWeight: 2 },
         label: { text: 'D', color: '#fff', fontSize: '10px', fontWeight: 'bold' },
       });
       const dr = new maps.DirectionsService();
-      const rr = new maps.DirectionsRenderer({ map, suppressMarkers: true,
+      const rr = new maps.DirectionsRenderer({
+        map, suppressMarkers: true,
         polylineOptions: { strokeColor: '#e8ff47', strokeOpacity: 0.7, strokeWeight: 3 },
       });
       dr.route({ origin: pickupPos, destination: dropPos, travelMode: maps.TravelMode.DRIVING },
@@ -177,7 +180,7 @@ function OrderMap({ order }) {
       bounds.extend(pickupPos); bounds.extend(dropPos);
       map.fitBounds(bounds, { top: 24, right: 24, bottom: 24, left: 24 });
       setReady(true);
-    }).catch(() => {});
+    }).catch(() => { });
   }, [pLat, pLng, dLat, dLng]);
 
   if (!pLat || !pLng || !dLat || !dLng) return null;
@@ -252,7 +255,7 @@ export default function OrderDetailPage() {
   // COD payment state — rider shows QR to customer
   const [codPayment, setCodPayment] = useState(null);
   const [codLoading, setCodLoading] = useState(false);
-  const [showQr, setShowQr]         = useState(false);
+  const [showQr, setShowQr] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [blockedError, setBlockedError] = useState(null); // banner shown when rider is blocked/inactive
@@ -316,6 +319,24 @@ export default function OrderDetailPage() {
     return () => window.removeEventListener('ws:cod:payment_received', handler);
   }, [id]);
 
+  // ── Real-time: order:taken — another rider accepted this order first ────────
+  useEffect(() => {
+    const handler = (e) => {
+      const { orderId } = e.detail || {};
+      if (orderId !== id) return;
+      // Update local state to reflect assigned state so Accept button disappears
+      setOrder(prev => prev ? { ...prev, assignedRiderId: '__taken__' } : prev);
+      toast('⚡ Another rider accepted this order first.', {
+        icon: '🔒',
+        duration: 4000,
+        style: { background: '#1c2433', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' },
+      });
+      // Navigate back after a short delay so rider sees the toast
+      setTimeout(() => navigate('/orders'), 2000);
+    };
+    window.addEventListener('ws:order:taken', handler);
+    return () => window.removeEventListener('ws:order:taken', handler);
+  }, [id, navigate]);
   // ── Real-time: update this order page when status changes elsewhere ───────
   // e.g. sender marks package ready (PLACED → READY), admin cancels, deliver completes
   // Also handles: rider was revoked/dropped — order back to PLACED with no assignedRiderId
@@ -356,6 +377,7 @@ export default function OrderDetailPage() {
         fetchCodPayment(updated);
       }
     };
+
     window.addEventListener('ws:order:updated', handler);
     return () => window.removeEventListener('ws:order:updated', handler);
   }, [id, order, navigate, fetchCodPayment]);
@@ -384,22 +406,36 @@ export default function OrderDetailPage() {
       // Silent background refresh to confirm server state (no skeleton flash)
       await refreshOrder();
     }, action).catch(err => {
-      // Extract the most specific message from the response
       const data = err.response?.data;
-      const msg  = data?.message
-                || data?.error
-                || data?.details
-                || (typeof data === 'string' ? data : null)
-                || err.message
-                || 'Action failed';
+      const msg = data?.message
+        || data?.error
+        || data?.details
+        || (typeof data === 'string' ? data : null)
+        || err.message
+        || 'Action failed';
       log.error(`order_${action} failed`, { msg, status: err.response?.status, data });
-      // Blocked / inactive rider — show a persistent banner instead of a toast
-      if (action === 'accept' && /blocked|inactive/i.test(msg)) {
-        setBlockedError(msg);
-      } else {
-        toast.error(msg, { duration: 5000 });
+
+      if (action === 'accept') {
+        // Another rider already accepted — update UI and navigate away cleanly
+        if (/already been accepted|no longer available|not available/i.test(msg) || err.response?.status === 403) {
+          setOrder(prev => prev ? { ...prev, assignedRiderId: '__taken__' } : prev);
+          toast('⚡ Another rider accepted this order first.', {
+            icon: '🔒',
+            duration: 4000,
+            style: { background: '#1c2433', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' },
+          });
+          setTimeout(() => navigate('/orders'), 2000);
+          return;
+        }
+        // Blocked / inactive rider — show persistent banner
+        if (/blocked|inactive/i.test(msg)) {
+          setBlockedError(msg);
+          return;
+        }
       }
-    });
+
+      toast.error(msg, { duration: 5000 });
+    })
   };
 
   if (loading) return (
@@ -426,11 +462,11 @@ export default function OrderDetailPage() {
     </div>
   );
 
-  const status     = order.status;
+  const status = order.status;
   const pickupAddr = [order.senderNode?.buildingOrFlat, order.senderNode?.street, order.senderNode?.area, order.senderNode?.city].filter(Boolean).join(', ');
-  const dropAddr   = [order.receiverNode?.buildingOrFlat, order.receiverNode?.street, order.receiverNode?.area, order.receiverNode?.city].filter(Boolean).join(', ');
-  const hasCoords  = order.senderNode?.latitude && order.receiverNode?.latitude;
-  const statusMap  = { PLACED: 'blue', DISPATCHED: 'orange', DELIVERED: 'green', CANCELLED: 'red', DRAFT: 'neutral' };
+  const dropAddr = [order.receiverNode?.buildingOrFlat, order.receiverNode?.street, order.receiverNode?.area, order.receiverNode?.city].filter(Boolean).join(', ');
+  const hasCoords = order.senderNode?.latitude && order.receiverNode?.latitude;
+  const statusMap = { PLACED: 'blue', DISPATCHED: 'orange', DELIVERED: 'green', CANCELLED: 'red', DRAFT: 'neutral' };
 
   return (
     <div>
@@ -611,25 +647,33 @@ export default function OrderDetailPage() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <Banknote size={16} style={{ color: codPayment?.paymentStatus === 'PAID' ? 'var(--green)' : 'var(--orange)' }} />
-            <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              color: codPayment?.paymentStatus === 'PAID' ? 'var(--green)' : 'var(--orange)' }}>
+            <span style={{
+              fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              color: codPayment?.paymentStatus === 'PAID' ? 'var(--green)' : 'var(--orange)'
+            }}>
               {codPayment?.paymentStatus === 'PAID' ? 'PAYMENT RECEIVED ✅' : 'COD — PAYMENT PENDING'}
             </span>
             {codLoading && <div className="loader" style={{ width: 12, height: 12, marginLeft: 'auto' }} />}
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-            padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: 12 }}>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+            padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: 12
+          }}>
             <span style={{ fontSize: 12, color: 'var(--text-2)' }}>Amount</span>
-            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 22,
-              color: codPayment?.paymentStatus === 'PAID' ? 'var(--green)' : 'var(--text-0)' }}>
+            <span style={{
+              fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 22,
+              color: codPayment?.paymentStatus === 'PAID' ? 'var(--green)' : 'var(--text-0)'
+            }}>
               ₹{Number(codPayment?.amount || order.billing?.payableAmount || 0).toFixed(2)}
             </span>
           </div>
 
           {codPayment?.paymentStatus === 'PAID' ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px',
-              background: 'rgba(22,163,74,0.1)', borderRadius: 10, border: '1px solid rgba(22,163,74,0.25)' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px',
+              background: 'rgba(22,163,74,0.1)', borderRadius: 10, border: '1px solid rgba(22,163,74,0.25)'
+            }}>
               <span style={{ fontSize: 22 }}>💰</span>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>Customer paid digitally</div>
@@ -653,13 +697,15 @@ export default function OrderDetailPage() {
                   setShowQr(v => !v);
                   if (!codPayment && !codLoading) fetchCodPayment(order);
                 }}
-                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   gap: 8, padding: '10px 0', borderRadius: 10,
                   border: '1.5px dashed rgba(245,158,11,0.5)',
                   background: showQr ? 'rgba(245,158,11,0.08)' : 'transparent',
                   color: 'var(--orange)', fontSize: 13, fontWeight: 700,
                   cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                  marginBottom: showQr ? 14 : 0 }}
+                  marginBottom: showQr ? 14 : 0
+                }}
               >
                 <QrCode size={15} />
                 {showQr ? 'Hide QR Code' : 'Show QR Code to Customer'}
@@ -674,8 +720,10 @@ export default function OrderDetailPage() {
                     </div>
                   ) : codPayment?.qrCodeImageUrl ? (
                     <>
-                      <div style={{ display: 'inline-block', padding: 12, background: '#fff',
-                        borderRadius: 14, border: '2px solid rgba(255,255,255,0.15)', marginBottom: 8 }}>
+                      <div style={{
+                        display: 'inline-block', padding: 12, background: '#fff',
+                        borderRadius: 14, border: '2px solid rgba(255,255,255,0.15)', marginBottom: 8
+                      }}>
                         <img src={codPayment.qrCodeImageUrl} alt="UPI QR"
                           style={{ width: 200, height: 200, display: 'block' }} />
                       </div>
@@ -683,8 +731,10 @@ export default function OrderDetailPage() {
                         PhonePe · GPay · Paytm · BHIM · Any UPI app
                       </div>
                       {codPayment.qrExpiresAt && (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          gap: 4, marginTop: 6, fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
+                        <div style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          gap: 4, marginTop: 6, fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)'
+                        }}>
                           <Clock size={10} />
                           Valid till {new Date(codPayment.qrExpiresAt * 1000)
                             .toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
@@ -699,9 +749,11 @@ export default function OrderDetailPage() {
                 </div>
               )}
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12,
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6, marginTop: 12,
                 padding: '8px 12px', background: 'rgba(245,158,11,0.08)',
-                borderRadius: 8, fontSize: 11, color: 'var(--orange)', fontFamily: 'var(--font-mono)' }}>
+                borderRadius: 8, fontSize: 11, color: 'var(--orange)', fontFamily: 'var(--font-mono)'
+              }}>
                 <Clock size={11} />
                 Waiting for customer payment · Updates automatically
               </div>
@@ -714,14 +766,16 @@ export default function OrderDetailPage() {
       <div className="card" style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', letterSpacing: '0.06em', marginBottom: 12 }}>ORDER INFO</div>
         {[
-          { label: 'Payment',  value: order.billing?.paymentMode || order.paymentMode },
-          { label: 'Pay Status', value: order.billing?.paymentMode === 'COD'
+          { label: 'Payment', value: order.billing?.paymentMode || order.paymentMode },
+          {
+            label: 'Pay Status', value: order.billing?.paymentMode === 'COD'
               ? (codPayment?.paymentStatus === 'PAID' ? '✅ Paid Digitally' : '⏳ Pending')
-              : null },
-          { label: 'Amount',   value: order.billing?.payableAmount ? `₹${Number(order.billing.payableAmount).toFixed(2)}` : null },
+              : null
+          },
+          { label: 'Amount', value: order.billing?.payableAmount ? `₹${Number(order.billing.payableAmount).toFixed(2)}` : null },
           { label: 'Distance', value: order.billing?.totalDistance ? `${Number(order.billing.totalDistance).toFixed(1)} km` : null },
           { label: 'Self Handling', value: order.isSelfHandling ? 'Yes' : 'No' },
-          { label: 'Created',  value: order.createdAt ? new Date(order.createdAt).toLocaleString() : null },
+          { label: 'Created', value: order.createdAt ? new Date(order.createdAt).toLocaleString() : null },
         ].filter(r => r.value).map(({ label, value }) => (
           <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
             <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{label}</span>
@@ -839,13 +893,27 @@ export default function OrderDetailPage() {
           )}
           {status === 'PLACED' && order?.assignedRiderId && (
             // Rider accepted — waiting for sender to mark package ready
-            <div style={{
-              flex: 1, textAlign: 'center',
-              padding: '12px 0',
-              color: 'rgba(255,255,255,0.5)',
-              fontSize: 13, fontWeight: 500,
-            }}>
-              ⏳ Waiting for sender to mark package ready…
+            // Drop Order button is active so rider can back out if needed
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{
+                textAlign: 'center',
+                padding: '10px 14px',
+                borderRadius: 12,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                color: 'rgba(255,255,255,0.5)',
+                fontSize: 13, fontWeight: 500,
+                lineHeight: 1.5,
+              }}>
+                ⏳ Waiting for sender to mark package ready…
+              </div>
+              <button
+                className="btn btn-danger"
+                style={{ flex: 1 }}
+                onClick={() => setShowCancel(true)}
+              >
+                <X size={15} /> Drop Order
+              </button>
             </div>
           )}
           {status === 'READY' && (

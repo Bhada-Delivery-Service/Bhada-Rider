@@ -133,6 +133,21 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
       window.dispatchEvent(new CustomEvent('ws:rider:updated', { detail: data }));
     });
 
+    // order:taken — another rider accepted this order before us.
+// Dismiss the new order alert immediately and dispatch so OrderDetailPage
+// can navigate away cleanly if the rider is currently viewing that order.
+socket.on('order:taken', (data) => {
+  const orderId = data?.orderId;
+  // If the alert is showing this exact order, dismiss it
+  setAlertOrder(prev => {
+    const alertId = prev?.orderId || prev?.id;
+    if (orderId && String(alertId) === String(orderId)) return null;
+    return prev;
+  });
+  // Dispatch so OrderDetailPage can react
+  window.dispatchEvent(new CustomEvent('ws:order:taken', { detail: data }));
+});
+
     // Fetch initial notifications inline (not via fetchNotifications callback)
     // so this effect only re-runs when accessToken actually changes — not when
     // the fetchNotifications useCallback reference changes.
@@ -154,6 +169,7 @@ export function NotificationProvider({ children, accessToken, onOnboardingApprov
       socket.off('notification:count');
       socket.off('order:updated');
       socket.off('rider:updated');
+      socket.off('order:taken')
     };
   // IMPORTANT: Only accessToken here. fetchNotifications and onOnboardingApproved
   // must NOT be deps — they are either called inline or via a ref to prevent
