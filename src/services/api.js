@@ -2,7 +2,7 @@ import axios from 'axios';
 import { logger } from '../utils/logger';
 
 const log = logger('API');
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
 
 // ─── Client-side rate limiter for sensitive mutation endpoints ──────────────
 // Prevents rapid double-taps from firing duplicate requests even if the
@@ -184,9 +184,11 @@ export const securityDepositAPI = {
 
 // ─── Service Area ──────────────────────────────────────────────────────────
 export const serviceAreaAPI = {
-  getActive:  ()                        => api.get('/service-areas/active'),
-  validate:   (pLat, pLng, dLat, dLng) =>
+  getActive:     ()                        => api.get('/service-areas/active'),
+  validate:      (pLat, pLng, dLat, dLng) =>
     api.get(`/service-areas/validate?pickupLat=${pLat}&pickupLng=${pLng}&dropLat=${dLat}&dropLng=${dLng}`),
+  validateArea:  (lat, lng)               =>
+    api.get(`/service-areas/validate-area?lat=${lat}&lng=${lng}`),
 };
 
 export default api;

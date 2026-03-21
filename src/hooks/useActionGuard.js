@@ -36,6 +36,8 @@ export function useActionGuard() {
 
     try {
       await fn();
+    } catch (err) {
+      throw err; // re-throw so caller's .catch() receives the actual error
     } finally {
       inFlightRef.current[key] = false;
       setLoadingKeys(prev => {
@@ -55,4 +57,4 @@ export function useActionGuard() {
   const anyLoading = Object.keys(loadingKeys).length > 0;
 
   return { guard, isLoading, anyLoading };
-}
+} 

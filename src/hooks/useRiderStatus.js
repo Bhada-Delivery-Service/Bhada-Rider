@@ -151,6 +151,12 @@ export function useRiderStatus() {
     log.action(`rider_status_change`, { action, riderId: user.uid });
 
     await guard(async () => {
+      // Blocked riders cannot change status — surface a clear message
+      const curStatus = riderData?.riderAvailabilityStatus || riderData?.status;
+      if (curStatus === 'BLOCKED') {
+        toast.error('🚫 Aapka account block hai. Status change nahi ho sakta. Admin se contact karein.');
+        return;
+      }
       let res;
       if (action === 'online')  res = await ridersAPI.goOnline(user.uid);
       else if (action === 'offline') res = await ridersAPI.goOffline(user.uid);
@@ -173,7 +179,8 @@ export function useRiderStatus() {
   }, [user?.uid, guard, handleTrackingForStatus, updateRider]);
 
   const currentStatus = riderData?.riderAvailabilityStatus || riderData?.status || 'OFFLINE';
-  const isOnline = ['ONLINE', 'AVAILABLE', 'BUSY'].includes(currentStatus);
+  const isBlocked = currentStatus === 'BLOCKED';
+  const isOnline  = !isBlocked && ['ONLINE', 'AVAILABLE', 'BUSY'].includes(currentStatus);
   const loadingStatus = isLoading(`status_online`) || isLoading(`status_offline`)
     || isLoading(`status_break`) || isLoading(`status_resume`);
 
@@ -185,6 +192,7 @@ export function useRiderStatus() {
     tracking,
     currentStatus,
     isOnline,
+    isBlocked,
     changeStatus,
     refresh: fetchData,
   };

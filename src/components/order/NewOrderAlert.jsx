@@ -11,9 +11,12 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, MapPin, ChevronRight, X, IndianRupee, Ruler } from 'lucide-react';
 import { startRing, stopRing } from '../../services/soundService';
+import { useAuth } from '../../context/AuthContext';
 
 export default function NewOrderAlert({ order, onDismiss }) {
   const navigate = useNavigate();
+  const { rider } = useAuth();
+  const isBlocked = rider?.status === 'BLOCKED' || rider?.riderAvailabilityStatus === 'BLOCKED';
   const [visible, setVisible] = useState(false);
 
   // Mount animation
@@ -22,10 +25,11 @@ export default function NewOrderAlert({ order, onDismiss }) {
   }, []);
 
   // Start ring when alert appears; stop when it unmounts
+  // Blocked riders: don't ring — they can't accept anyway
   useEffect(() => {
-    startRing();
+    if (!isBlocked) startRing();
     return () => stopRing();
-  }, []);
+  }, [isBlocked]);
 
   const close = () => {
     stopRing();
@@ -79,7 +83,7 @@ export default function NewOrderAlert({ order, onDismiss }) {
       {/* ── Backdrop ── */}
       <div style={{
         position: 'fixed', inset: 0, zIndex: 99999,
-        background: 'rgba(5,8,15,0.97)',
+        background: 'rgba(5,8,15,0.98)',
         backdropFilter: 'blur(8px)',
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
@@ -135,7 +139,7 @@ export default function NewOrderAlert({ order, onDismiss }) {
         {/* ── Card ── */}
         <div style={{
           width: '100%', maxWidth: 360,
-          background: 'var(--bg-1, #0d1117)',
+          background: '#0d1117',
           border: '1.5px solid rgba(0,229,160,0.3)',
           borderRadius: 20,
           padding: '22px 20px',
@@ -171,28 +175,28 @@ export default function NewOrderAlert({ order, onDismiss }) {
 
           {/* Route */}
           <div style={{
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.12)',
             borderRadius: 12,
             padding: '12px 14px',
             marginBottom: 12,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#00e5a0', flexShrink: 0 }} />
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-mono, monospace)', letterSpacing: '0.06em' }}>PICKUP</div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontFamily: 'var(--font-mono, monospace)', letterSpacing: '0.06em' }}>PICKUP</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#f0f4ff', marginLeft: 'auto', textAlign: 'right', maxWidth: '65%' }}>{pickupCity}</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff4d6d', flexShrink: 0 }} />
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-mono, monospace)', letterSpacing: '0.06em' }}>DROP</div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontFamily: 'var(--font-mono, monospace)', letterSpacing: '0.06em' }}>DROP</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#f0f4ff', marginLeft: 'auto', textAlign: 'right', maxWidth: '65%' }}>{dropCity}</div>
             </div>
           </div>
 
           {/* Stats row */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-            <div style={{ flex: 1, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: '8px 10px', textAlign: 'center' }}>
-              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-mono, monospace)', marginBottom: 4 }}>ITEMS</div>
+            <div style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '8px 10px', textAlign: 'center' }}>
+              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', fontFamily: 'var(--font-mono, monospace)', marginBottom: 4 }}>ITEMS</div>
               <div style={{ fontSize: 16, fontWeight: 800, color: '#f0f4ff' }}>{itemCount}</div>
             </div>
             {amount && (
@@ -202,36 +206,58 @@ export default function NewOrderAlert({ order, onDismiss }) {
               </div>
             )}
             {distance && (
-              <div style={{ flex: 1, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: '8px 10px', textAlign: 'center' }}>
-                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-mono, monospace)', marginBottom: 4 }}>DIST</div>
+              <div style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '8px 10px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', fontFamily: 'var(--font-mono, monospace)', marginBottom: 4 }}>DIST</div>
                 <div style={{ fontSize: 16, fontWeight: 800, color: '#f0f4ff' }}>{distance}</div>
               </div>
             )}
           </div>
 
           {/* Action buttons */}
-          <button
-            onClick={handleView}
-            style={{
+          {isBlocked ? (
+            /* ── Blocked rider — cannot accept, show clear reason ── */
+            <div style={{
               width: '100%',
-              padding: '14px 0',
+              padding: '14px 16px',
               borderRadius: 12,
-              border: 'none',
-              background: 'linear-gradient(135deg, #00e5a0, #00c87a)',
-              color: '#05080f',
-              fontSize: 15, fontWeight: 800,
-              letterSpacing: '-0.01em',
-              cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              background: 'rgba(220,38,38,0.12)',
+              border: '1.5px solid rgba(220,38,38,0.45)',
               marginBottom: 10,
-              boxShadow: '0 4px 20px rgba(0,229,160,0.35)',
-              transition: 'transform 0.1s ease, box-shadow 0.1s ease',
-            }}
-            onMouseDown={e => e.currentTarget.style.transform = 'scale(0.97)'}
-            onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
-          >
-            View Order <ChevronRight size={17} />
-          </button>
+              textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 20, marginBottom: 6 }}>🚫</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#ff4d6d', marginBottom: 4 }}>
+                Order Accept Nahi Ho Sakta
+              </div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', lineHeight: 1.55 }}>
+                Aapka account <strong style={{ color: '#ff4d6d' }}>block</strong> hai.{''}
+                Admin se contact karein apna account unblock karwane ke liye.
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={handleView}
+              style={{
+                width: '100%',
+                padding: '14px 0',
+                borderRadius: 12,
+                border: 'none',
+                background: 'linear-gradient(135deg, #00e5a0, #00c87a)',
+                color: '#05080f',
+                fontSize: 15, fontWeight: 800,
+                letterSpacing: '-0.01em',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                marginBottom: 10,
+                boxShadow: '0 4px 20px rgba(0,229,160,0.35)',
+                transition: 'transform 0.1s ease, box-shadow 0.1s ease',
+              }}
+              onMouseDown={e => e.currentTarget.style.transform = 'scale(0.97)'}
+              onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
+            >
+              View Order <ChevronRight size={17} />
+            </button>
+          )}
 
           <button
             onClick={close}
@@ -241,7 +267,7 @@ export default function NewOrderAlert({ order, onDismiss }) {
               borderRadius: 12,
               border: '1px solid rgba(255,255,255,0.1)',
               background: 'transparent',
-              color: 'rgba(255,255,255,0.4)',
+              color: 'rgba(255,255,255,0.6)',
               fontSize: 13, fontWeight: 600,
               cursor: 'pointer',
             }}

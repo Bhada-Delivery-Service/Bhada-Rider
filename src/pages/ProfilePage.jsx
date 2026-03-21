@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { User, Car, FileText, Send, CheckCircle, Clock, XCircle, RefreshCw, ChevronRight, Edit2, X, Banknote, Sun, Moon, Languages } from 'lucide-react';
+import { User, Car, FileText, Send, CheckCircle, Clock, XCircle, RefreshCw, ChevronRight, Edit2, X, Banknote, Sun, Moon, Languages, Volume2, Play } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ridersAPI, filesAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { RING_TONES, getSelectedTone, setSelectedTone, previewTone } from '../services/soundService';
+
 import { useTheme } from '../context/ThemeContext';
 import { useLang } from '../context/LangContext';
 
@@ -294,6 +296,7 @@ export default function ProfilePage() {
   const [riderData, setRiderData] = useState(null);
   const [onboardingStatus, setOnboardingStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedTone, setSelectedToneState] = useState(() => getSelectedTone());
   const [modal, setModal] = useState(null);
 
   const fetchRider = async () => {
@@ -636,6 +639,68 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      {/* Ring Tone Selector */}
+      <div className="card mb-12">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 'var(--r-sm)', background: 'var(--accent-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Volume2 size={15} style={{ color: 'var(--accent)' }} />
+          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700 }}>Order Alert Sound</div>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 12 }}>
+          Nayi order aane par kaun sa sound bajega — apni marzi se chunein
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {RING_TONES.map(tone => (
+            <div
+              key={tone.id}
+              onClick={() => { setSelectedTone(tone.id); setSelectedToneState(tone.id); }}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '11px 14px',
+                borderRadius: 10,
+                border: selectedTone === tone.id
+                  ? '1.5px solid var(--accent)'
+                  : '1px solid var(--border)',
+                background: selectedTone === tone.id ? 'var(--accent-dim)' : 'var(--bg-2)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 18 }}>{tone.emoji}</span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: selectedTone === tone.id ? 'var(--accent)' : 'var(--text-0)' }}>
+                    {tone.label}
+                  </div>
+                  {selectedTone === tone.id && (
+                    <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                      ✓ Selected
+                    </div>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={e => { e.stopPropagation(); previewTone(tone.id); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-1)',
+                  color: 'var(--text-1)',
+                  fontSize: 11, fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                <Play size={10} /> Preview
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Sign out */}
       <button className="btn btn-danger" style={{ width: '100%', marginTop: 4 }} onClick={logout}>
         {t('sign_out')}
@@ -648,4 +713,4 @@ export default function ProfilePage() {
       {modal === 'bank' && <BankAccountModal uid={user.uid} riderData={rd} onClose={() => setModal(null)} onSave={fetchRider} />}
     </div>
   );
-}
+}   
