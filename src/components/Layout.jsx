@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Outlet, NavLink } from 'react-router-dom';
+import { Outlet, NavLink,useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Package, MapPin, User, Bike, Bell, IndianRupee } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
@@ -8,10 +8,12 @@ import NotificationDrawer from '../components/NotificationDrawer';
 import NewOrderAlert from '../components/order/NewOrderAlert';
 import { unlockAudio } from '../services/soundService';
 
+
 export default function Layout() {
   const { user, rider } = useAuth();
   const { unseenCount, openDrawer, alertOrder, dismissAlert } = useNotifications();
   const { t } = useLang();
+  const navigate = useNavigate();
   const initials = rider?.firstName?.[0] || rider?.name?.[0] || '?';
 
   // Unlock Web Audio on the first user gesture anywhere in the app.
@@ -95,19 +97,30 @@ export default function Layout() {
         </button>
 
         {/* Avatar */}
-        <div style={{
-          width: 34, height: 34,
-          background: 'var(--accent-dim)',
-          border: '1.5px solid rgba(30,198,116,0.25)',
-          borderRadius: '50%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 13, fontWeight: 800,
-          color: 'var(--accent)',
-          flexShrink: 0,
-          letterSpacing: '-0.02em',
-        }}>
-          {initials.toUpperCase()}
-        </div>
+  {/* Avatar */}
+<NavLink 
+  to="/profile" 
+  style={{ 
+    textDecoration: 'none',
+    position: 'relative',
+    zIndex: 9999,
+  }}
+>
+  <div style={{
+    width: 34, height: 34,
+    background: 'var(--accent-dim)',
+    border: '1.5px solid rgba(30,198,116,0.25)',
+    borderRadius: '50%',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 13, fontWeight: 800,
+    color: 'var(--accent)',
+    flexShrink: 0,
+    letterSpacing: '-0.02em',
+    cursor: 'pointer',
+  }}>
+    {initials.toUpperCase()}
+  </div>
+</NavLink>
       </header>
 
       {/* ── Page ── */}
