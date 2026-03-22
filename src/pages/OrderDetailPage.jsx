@@ -329,7 +329,7 @@ export default function OrderDetailPage() {
       toast('⚡ Another rider accepted this order first.', {
         icon: '🔒',
         duration: 4000,
-        style: { background: '#1c2433', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' },
+     style: { background: 'var(--bg-1)', color: 'var(--text-0)', border: '1px solid var(--border)' },
       });
       // Navigate back after a short delay so rider sees the toast
       setTimeout(() => navigate('/orders'), 2000);
@@ -587,7 +587,7 @@ export default function OrderDetailPage() {
           </div>
         </div>
 
-        <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', marginBottom: 12 }} />
+        <div style={{ height: 1, background: 'var(--border)', marginBottom: 12 }} />
 
         {/* Receiver */}
         <div>
@@ -802,7 +802,7 @@ export default function OrderDetailPage() {
               Order Accept Nahi Ho Sakta
             </span>
           </div>
-          <div style={{ fontSize: 12, color: '#000000', lineHeight: 1.55, paddingLeft: 26 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.55, paddingLeft: 26 }}>
             Aapka account <strong style={{ color: '#ff4d6d' }}>block</strong> hai ya inactive hai.
             Naye orders accept karne ke liye admin se contact karein.
           </div>
@@ -895,13 +895,13 @@ export default function OrderDetailPage() {
             // Rider accepted — waiting for sender to mark package ready
             // Drop Order button is active so rider can back out if needed
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{
+          <div style={{
                 textAlign: 'center',
                 padding: '10px 14px',
                 borderRadius: 12,
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: 'rgba(255,255,255,0.5)',
+                background: 'var(--bg-2)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-2)',
                 fontSize: 13, fontWeight: 500,
                 lineHeight: 1.5,
               }}>
@@ -975,3 +975,4 @@ export default function OrderDetailPage() {
     </div>
   );
 }
+
