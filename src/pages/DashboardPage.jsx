@@ -5,6 +5,7 @@ import { useRiderStatus }    from '../hooks/useRiderStatus';
 import { useOrders }         from '../hooks/useOrders';
 import { useNetworkStatus }  from '../hooks/useNetworkStatus';
 import { SkeletonDashboard } from '../components/ui/SkeletonLoader';
+import { useNavigate } from 'react-router-dom';
 
 function getStatusConfig(t) {
   return {
@@ -49,7 +50,7 @@ const PerformanceSection = memo(function PerformanceSection({ performance, t }) 
   );
 });
 
-const AvailableOrdersSection = memo(function AvailableOrdersSection({ orders, t }) {
+const AvailableOrdersSection = memo(function AvailableOrdersSection({ orders, t, navigate }) {
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
@@ -59,7 +60,6 @@ const AvailableOrdersSection = memo(function AvailableOrdersSection({ orders, t 
           </div>
           <div className="section-header" style={{ marginBottom: 0 }}>{t('available_orders')}</div>
         </div>
-  
         <span className="badge blue">{orders.length}</span>
       </div>
 
@@ -70,11 +70,16 @@ const AvailableOrdersSection = memo(function AvailableOrdersSection({ orders, t 
       ) : (
         <div>
           {orders.slice(0, 3).map((order, i) => (
-            <div key={order.orderId || order.id} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '11px 0',
-              borderBottom: i < Math.min(orders.length, 3) - 1 ? '1px solid var(--border)' : 'none',
-            }}>
+            <div
+              key={order.orderId || order.id}
+              onClick={() => navigate(`/orders/${order.orderId || order.id}`)}
+              style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '11px 0',
+                borderBottom: i < Math.min(orders.length, 3) - 1 ? '1px solid var(--border)' : 'none',
+                cursor: 'pointer',
+              }}
+            >
               <div>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
                   #{(order.orderId || order.id || '').slice(-8).toUpperCase()}
@@ -86,10 +91,27 @@ const AvailableOrdersSection = memo(function AvailableOrdersSection({ orders, t 
               <span className="badge blue">NEW</span>
             </div>
           ))}
+
           {orders.length > 3 && (
-            <div style={{ textAlign: 'center', paddingTop: 12, fontSize: 12, color: 'var(--text-2)', fontWeight: 500 }}>
-              +{orders.length - 3} {t('more_in_orders_tab')}
-            </div>
+            <button
+             onClick={() => navigate('/orders')}
+              style={{
+                display: 'block',
+                width: '100%',
+                marginTop: 12,
+                padding: '8px 0',
+                background: 'var(--bg-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--r-sm)',
+                fontSize: 12,
+                fontWeight: 600,
+                color: 'var(--blue)',
+                cursor: 'pointer',
+                textAlign: 'center',
+              }}
+            >
+              +{orders.length - 3} more orders →
+            </button>
           )}
         </div>
       )}
@@ -98,6 +120,7 @@ const AvailableOrdersSection = memo(function AvailableOrdersSection({ orders, t 
 });
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const { riderData, performance, loading, loadingStatus, tracking, currentStatus, isOnline, changeStatus, refresh } = useRiderStatus();
   const { placedOrders } = useOrders({ autoFetch: isOnline });
   const { isOnline: hasNetwork } = useNetworkStatus();
@@ -294,7 +317,7 @@ export default function DashboardPage() {
       </div>
 
       <PerformanceSection performance={performance} t={t} />
-      {isOnline && !isBlocked && <AvailableOrdersSection orders={placedOrders} t={t} />}
+      {isOnline && !isBlocked && <AvailableOrdersSection orders={placedOrders} t={t} navigate={navigate} />}
 
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}`}</style>
     </div>
