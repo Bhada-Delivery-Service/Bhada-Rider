@@ -186,55 +186,94 @@ function ProfileModal({ riderData, uid, onClose, onSave }) {
 }
 
 function VehicleModal({ uid, riderData, onClose, onSave }) {
-  // BUG FIX: vehicle is now in nested rd.vehicle object; fall back to flat fields for legacy compat
   const existingVehicle = riderData?.vehicle || {
-    vehicleType: riderData?.vehicleType,
+    vehicleType:   riderData?.vehicleType,
     vehicleNumber: riderData?.vehicleNumber,
   };
-  const [form, setForm] = useState({
-    vehicleType: existingVehicle?.vehicleType || 'BIKE',
+ 
+  const [form, setForm]             = useState({
+    vehicleType:   existingVehicle?.vehicleType   || '',
     vehicleNumber: existingVehicle?.vehicleNumber || '',
   });
-  const [saving, setSaving] = useState(false);
-
+  const [saving, setSaving]         = useState(false);
+  const [vehicleTypes, setVehicleTypes] = useState([]);  // ← dynamic
+  const [loadingTypes, setLoadingTypes] = useState(true);
+ 
+  // Fetch active vehicle types from backend on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        // Uses your existing axios instance — same base URL as other API calls
+        const { data } = await ridersAPI.getVehicleTypes();     // see api.js changes below
+        const types = data?.data ?? data ?? [];
+        setVehicleTypes(types);
+        // Pre-select first type if form has no type yet
+        if (!form.vehicleType && types.length > 0) {
+          setForm(f => ({ ...f, vehicleType: types[0].id }));
+        }
+      } catch {
+        // Fallback to a safe default so rider is not blocked
+        setVehicleTypes([{ id: 'BIKE', name: 'Bike / Motorcycle', icon: '🏍️' }]);
+        if (!form.vehicleType) setForm(f => ({ ...f, vehicleType: 'BIKE' }));
+      } finally {
+        setLoadingTypes(false);
+      }
+    })();
+  }, []);
+ 
   const handleSave = async () => {
     if (!form.vehicleNumber.trim()) { toast.error('Enter vehicle number'); return; }
+    if (!form.vehicleType)          { toast.error('Select vehicle type');  return; }
     setSaving(true);
     try {
       await ridersAPI.submitVehicle(uid, form);
       toast.success('Vehicle submitted!');
-      onSave(); onClose();
+      onSave?.();
+      onClose();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to submit vehicle');
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
-
+ 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-title">Vehicle Details</div>
-          <button className="modal-close" onClick={onClose}><X size={14} /></button>
-        </div>
+    <div className="modal-overlay">
+      <div className="modal-card">
+        <div className="modal-title">Vehicle Details</div>
+ 
         <div className="form-group">
           <label className="form-label">Vehicle Type</label>
-          <select className="form-select" value={form.vehicleType}
-            onChange={e => setForm(f => ({ ...f, vehicleType: e.target.value }))}>
-            <option value="BIKE">Bike</option>
-            <option value="SCOOTER">Scooter</option>
-            <option value="CYCLE">Cycle</option>
-            <option value="CAR">Car</option>
-            <option value="VAN">Van</option>
-          </select>
+          {loadingTypes ? (
+            <div className="form-select" style={{ color: 'var(--text-tertiary)' }}>Loading…</div>
+          ) : (
+            <select
+              className="form-select"
+              value={form.vehicleType}
+              onChange={e => setForm(f => ({ ...f, vehicleType: e.target.value }))}
+            >
+              {vehicleTypes.map(v => (
+                <option key={v.id} value={v.id}>
+                  {v.icon ? `${v.icon} ` : ''}{v.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
+ 
         <div className="form-group">
           <label className="form-label">Vehicle Number</label>
-          <input className="form-input" placeholder="e.g. MH01AB1234" value={form.vehicleNumber}
-            onChange={e => setForm(f => ({ ...f, vehicleNumber: e.target.value.toUpperCase() }))} />
+          <input
+            className="form-input"
+            placeholder="e.g. MH01AB1234"
+            value={form.vehicleNumber}
+            onChange={e => setForm(f => ({ ...f, vehicleNumber: e.target.value.toUpperCase() }))}
+          />
         </div>
+ 
         <div className="flex gap-8">
           <button className="btn btn-secondary flex-1" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={saving}>
+          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={saving || loadingTypes}>
             {saving ? 'Submitting…' : 'Submit Vehicle'}
           </button>
         </div>
@@ -242,7 +281,6 @@ function VehicleModal({ uid, riderData, onClose, onSave }) {
     </div>
   );
 }
-
 function KycModal({ uid, riderData, onClose, onSave }) {
   // BUG FIX: kyc data is now in nested rd.kyc object; fall back to flat fields for legacy compat
   const existing = riderData?.kyc || {

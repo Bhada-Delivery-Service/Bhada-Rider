@@ -102,6 +102,7 @@ export const ridersAPI = {
   // FCM push token — call after login (Android), clear on logout
   saveFcmToken:      (id, token)   => api.put(`/riders/${id}/fcm-token`, { fcmToken: token }),
   clearFcmToken:     (id)          => api.delete(`/riders/${id}/fcm-token`),
+  getVehicleTypes: () => api.get('/vehicle-config'),
 };
 
 // ─── Orders ────────────────────────────────────────────────────────────────
