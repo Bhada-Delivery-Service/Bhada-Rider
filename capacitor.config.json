@@ -1,5 +1,17 @@
 {
-  "appId": "com.example.app",
-  "appName": "bhada-rider-app",
-  "webDir": "dist"
+  "appId": "com.bhada.rider",
+  "appName": "Bhada Rider",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true
+  },
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon_config_sample",
+      "iconColor": "#00e5a0"
+    }
+  }
 }

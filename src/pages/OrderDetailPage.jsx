@@ -881,16 +881,28 @@ export default function OrderDetailPage() {
       {/* ── Sticky action bar ── */}
       {!showDeliver && !showCancel && (
         <div className="sticky-action-bar">
-          {status === 'PLACED' && !order?.assignedRiderId && (
-            <button
-              className="btn btn-primary"
-              style={{ flex: 1, opacity: blockedError ? 0.45 : 1 }}
-              disabled={actionLoading || !!blockedError}
-              onClick={() => { setBlockedError(null); handleAction('accept'); }}
-            >
-              <Truck size={15} /> Accept Order
-            </button>
-          )}
+         {status === 'PLACED' && !order?.assignedRiderId && (
+  <button
+    className="btn btn-primary"
+    style={{ flex: 1, opacity: blockedError ? 0.45 : 1 }}
+    disabled={actionLoading || !!blockedError}
+    onClick={() => { setBlockedError(null); handleAction('accept'); }}
+  >
+    {actionLoading ? (
+      <>
+        <svg width="15" height="15" viewBox="0 0 15 15"
+          style={{ animation: 'spin 0.8s linear infinite', flexShrink: 0 }}>
+          <circle cx="7.5" cy="7.5" r="6" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeDasharray="28" strokeDashoffset="10"
+            strokeLinecap="round" />
+        </svg>
+        Accepting...
+      </>
+    ) : (
+      <><Truck size={15} /> Accept Order</>
+    )}
+  </button>
+)}
           {status === 'PLACED' && order?.assignedRiderId && (
             // Rider accepted — waiting for sender to mark package ready
             // Drop Order button is active so rider can back out if needed
