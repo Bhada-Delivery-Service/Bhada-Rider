@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:android": "vite build --mode android",
+    "build:android:prod": "vite build --mode android.production",
     "preview": "vite preview"
   },
   "dependencies": {
