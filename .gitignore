@@ -6,3 +6,4 @@ build/
 .env.android
 .env.android.production
 dist/
+android/
