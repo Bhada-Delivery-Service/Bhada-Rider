@@ -87,8 +87,19 @@ export const verifyOTP = async (confirmationResultOrOtp, otp) => {
     return idToken;
 
   } else {
-    // ── WEB ── ❌ Yeh mat badlo — same rahega
+   // ── WEB ── ✅ Yeh fix kiya
+    // confirmationResultOrOtp = Firebase confirmationResult object
+    // otp = "123456" string
     const otpStr = String(otp).trim();
+    
+    console.log('Web verifyOTP called');
+    console.log('OTP string:', otpStr);
+    console.log('confirmationResult valid:', !!confirmationResultOrOtp?.confirm);
+
+    if (!confirmationResultOrOtp || typeof confirmationResultOrOtp.confirm !== 'function') {
+      throw new Error('Invalid confirmationResult — pehle OTP bhejo');
+    }
+
     const result = await confirmationResultOrOtp.confirm(otpStr);
     return result.user.getIdToken();
   }
