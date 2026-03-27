@@ -133,7 +133,7 @@ function PlaceSearchBox({ onPreview, placeholder = 'Search location…', accentC
   );
 }
 
-/* ─── Route Map Modal (Redesigned) ──────────────────────────────────────── */
+/* ─── Route Map Modal (Fixed) ────────────────────────────────────────────── */
 function RouteMapModal({ onClose, onSave, loading }) {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
@@ -143,11 +143,15 @@ function RouteMapModal({ onClose, onSave, loading }) {
 
   const [mapsReady, setMapsReady] = useState(mapsLoaded);
   const [step, setStep] = useState(1); // 1=start, 2=end, 3=details
+  const stepRef = useRef(1); // ✅ FIX: ref to always have latest step in map click handler
+
   const [startPoint, setStartPoint] = useState(null);
   const [endPoint, setEndPoint] = useState(null);
+  const startPointRef = useRef(null); // ✅ FIX: ref for latest startPoint
+  const endPointRef = useRef(null);   // ✅ FIX: ref for latest endPoint
+
   const [routeName, setRouteName] = useState('');
-  const routeNameRef = useRef(null); // uncontrolled ref for the input to prevent focus loss
-  const [editingName, setEditingName] = useState(false);
+  const routeNameRef = useRef(null);
   const [threshold1, setThreshold1] = useState(500);
   const [threshold2, setThreshold2] = useState(500);
   const [threshold3, setThreshold3] = useState(300);
@@ -163,12 +167,24 @@ function RouteMapModal({ onClose, onSave, loading }) {
   const geocoder = useRef(null);
   const directionsService = useRef(null);
 
-  // Route name is entered manually by rider — no auto-fill
+  // ✅ FIX: Keep stepRef in sync with step state
+  useEffect(() => {
+    stepRef.current = step;
+  }, [step]);
+
+  // ✅ FIX: Keep startPointRef / endPointRef in sync
+  useEffect(() => {
+    startPointRef.current = startPoint;
+  }, [startPoint]);
+
+  useEffect(() => {
+    endPointRef.current = endPoint;
+  }, [endPoint]);
 
   // Update circles when thresholds change
   useEffect(() => {
     if (!mapInstance.current) return;
-    circlesRef.current.forEach(c => c.setMap && c.setMap(null));
+    circlesRef.current.forEach(c => c._isThreshold && c.setMap(null));
     circlesRef.current = circlesRef.current.filter(c => !c._isThreshold);
 
     if (startPoint) {
@@ -222,8 +238,10 @@ function RouteMapModal({ onClose, onSave, loading }) {
     placeMarker(preview.lat, preview.lng, preview.type, preview.label);
     if (preview.type === 'start') {
       setStartPoint(preview);
+      startPointRef.current = preview;
     } else {
       setEndPoint(preview);
+      endPointRef.current = preview;
     }
     setPreview(null);
   }, [preview]);
@@ -256,28 +274,38 @@ function RouteMapModal({ onClose, onSave, loading }) {
     });
     directionsRendererRef.current.setMap(map);
 
+    // ✅ FIX: Use refs instead of stale closures — no setStep(prev => ...) pattern
     map.addListener('click', (e) => {
       const lat = e.latLng.lat();
       const lng = e.latLng.lng();
+      const currentStep = stepRef.current;
+
+      // Only handle clicks on step 1 or step 2
+      if (currentStep !== 1 && currentStep !== 2) return;
+
       reverseGeocode(lat, lng, (label) => {
-        setStep(prev => {
-          if (prev === 1) {
-            placeMarker(lat, lng, 'start', label);
-            setStartPoint({ lat, lng, label });
-            return 2;
-          } else if (prev === 2) {
-            placeMarker(lat, lng, 'end', label);
-            setEndPoint({ lat, lng, label });
-            return 3;
-          }
-          return prev;
-        });
+        if (currentStep === 1) {
+          placeMarker(lat, lng, 'start', label);
+          const pt = { lat, lng, label };
+          setStartPoint(pt);
+          startPointRef.current = pt;
+          setStep(2);
+          stepRef.current = 2;
+        } else if (currentStep === 2) {
+          placeMarker(lat, lng, 'end', label);
+          const pt = { lat, lng, label };
+          setEndPoint(pt);
+          endPointRef.current = pt;
+          setStep(3);
+          stepRef.current = 3;
+        }
       });
     });
 
     getCurrentLocation(map);
   }, [mapsReady]);
 
+  // Fetch directions whenever both points are set
   useEffect(() => {
     if (!mapInstance.current || !startPoint || !endPoint || !directionsService.current) return;
     setFetchingRoute(true);
@@ -317,7 +345,6 @@ function RouteMapModal({ onClose, onSave, loading }) {
     geocoder.current.geocode({ location: { lat, lng } }, (results, status) => {
       if (status === 'OK' && results[0]) {
         const parts = results[0].address_components;
-        // Try sublocality first, then locality, then first component of formatted address
         const sub = parts.find(p => p.types.includes('sublocality_level_1') || p.types.includes('sublocality'));
         const loc = parts.find(p => p.types.includes('locality'));
         const name = sub?.long_name || loc?.long_name || results[0].formatted_address.split(',')[0];
@@ -375,9 +402,11 @@ function RouteMapModal({ onClose, onSave, loading }) {
     circlesRef.current.forEach(c => c.setMap && c.setMap(null));
     circlesRef.current = [];
     if (directionsRendererRef.current) directionsRendererRef.current.setDirections({ routes: [] });
-    setStartPoint(null); setEndPoint(null);
+    setStartPoint(null); startPointRef.current = null;
+    setEndPoint(null);   endPointRef.current = null;
     setRouteDistance(null); setRouteDuration(null);
-    setEncodedPolyline(''); setStep(1);
+    setEncodedPolyline('');
+    setStep(1);          stepRef.current = 1;
   };
 
   const handleFinalSave = () => {
@@ -489,7 +518,7 @@ function RouteMapModal({ onClose, onSave, loading }) {
     );
   };
 
-  /* preview banner JSX — rendered inline, not as a component */
+  /* preview banner JSX */
   const previewBannerJSX = preview ? (
     <div style={{ marginBottom: 12, background: '#0d1220', border: `1.5px solid ${accent}`, borderRadius: 12, padding: '10px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
@@ -536,7 +565,7 @@ function RouteMapModal({ onClose, onSave, loading }) {
           <div>
             <div style={{ fontSize: 15, fontWeight: 700, color: '#eaeee8', letterSpacing: '-0.01em' }}>New Route</div>
             <div style={{ fontSize: 10, color: '#445' }}>
-              {fetchingRoute ? '🔄 Calculating road route…' : step === 1 ? 'Set start point' : step === 2 ? 'Set end point' : 'Configure details'}
+              {fetchingRoute ? '🔄 Calculating road route…' : step === 1 ? 'Tap map to set start point' : step === 2 ? 'Tap map to set end point' : 'Configure details'}
             </div>
           </div>
         </div>
@@ -548,7 +577,7 @@ function RouteMapModal({ onClose, onSave, loading }) {
         </div>
       </div>
 
-      {/* Map — always mounted, never unmounts, fixed height */}
+      {/* Map — always mounted */}
       <div style={{ height: '42vh', flexShrink: 0, position: 'relative' }}>
         <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
         {!mapsReady && (
@@ -562,8 +591,13 @@ function RouteMapModal({ onClose, onSave, loading }) {
             ) : <div className="loader" />}
           </div>
         )}
-        {mapsReady && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 2 }}>
+
+        {/* Step hint overlay on map */}
+        {mapsReady && (step === 1 || step === 2) && (
+          <div style={{
+            position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+            pointerEvents: 'none', zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+          }}>
             <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
               <circle cx="18" cy="18" r="4" fill={accent} opacity="0.9" />
               <circle cx="18" cy="18" r="8" stroke={accent} strokeWidth="1.5" opacity="0.5" />
@@ -574,38 +608,96 @@ function RouteMapModal({ onClose, onSave, loading }) {
             </svg>
           </div>
         )}
+
         {mapsReady && (
-          <button onClick={handleLocateMe} disabled={locating} style={{ position: 'absolute', bottom: 12, right: 12, zIndex: 3, width: 40, height: 40, borderRadius: '50%', background: '#1a1e1a', border: `1px solid ${accent}44`, color: locating ? '#556' : accent, display: 'grid', placeItems: 'center', cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.5)' }}>
+          <button onClick={handleLocateMe} disabled={locating} style={{
+            position: 'absolute', bottom: 12, right: 12, zIndex: 3,
+            width: 40, height: 40, borderRadius: '50%',
+            background: '#1a1e1a', border: `1px solid ${accent}44`,
+            color: locating ? '#556' : accent,
+            display: 'grid', placeItems: 'center', cursor: 'pointer',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
+          }}>
             <Crosshair size={16} style={{ animation: locating ? 'ksp 1s linear infinite' : 'none' }} />
           </button>
         )}
+
         {(startPoint || endPoint) && (
-          <button onClick={resetPoints} style={{ position: 'absolute', top: 10, right: 10, zIndex: 3, background: 'rgba(13,18,32,0.9)', border: '1px solid #2e3330', borderRadius: 8, padding: '5px 10px', color: '#888', cursor: 'pointer', fontSize: 11 }}>↩ Reset</button>
+          <button onClick={resetPoints} style={{
+            position: 'absolute', top: 10, right: 10, zIndex: 3,
+            background: 'rgba(13,18,32,0.9)', border: '1px solid #2e3330',
+            borderRadius: 8, padding: '5px 10px', color: '#888', cursor: 'pointer', fontSize: 11,
+          }}>↩ Reset</button>
         )}
+
         {mapsReady && (startPoint || endPoint) && (
-          <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 3, background: 'rgba(13,18,32,0.92)', border: '1px solid #2e3330', borderRadius: 8, padding: '7px 10px', fontSize: 11 }}>
-            {startPoint && <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: endPoint ? 3 : 0 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block' }} /><span style={{ color: '#c8cec9' }}>{startPoint.label}</span></div>}
-            {endPoint && <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block' }} /><span style={{ color: '#c8cec9' }}>{endPoint.label}</span></div>}
-            {routeDistance && <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid #2e3330', color: '#556', fontFamily: 'monospace', fontSize: 10 }}>🛣 {routeDistance} · {routeDuration}</div>}
+          <div style={{
+            position: 'absolute', top: 10, left: 10, zIndex: 3,
+            background: 'rgba(13,18,32,0.92)', border: '1px solid #2e3330',
+            borderRadius: 8, padding: '7px 10px', fontSize: 11,
+          }}>
+            {startPoint && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: endPoint ? 3 : 0 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block' }} />
+                <span style={{ color: '#c8cec9' }}>{startPoint.label}</span>
+              </div>
+            )}
+            {endPoint && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block' }} />
+                <span style={{ color: '#c8cec9' }}>{endPoint.label}</span>
+              </div>
+            )}
+            {routeDistance && (
+              <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid #2e3330', color: '#556', fontFamily: 'monospace', fontSize: 10 }}>
+                🛣 {routeDistance} · {routeDuration}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Bottom drawer — all steps rendered together with display:none toggling so inputs are never unmounted */}
-      <div style={{ flex: 1, background: '#141714', borderTop: `2px solid ${accent}22`, borderRadius: '18px 18px 0 0', overflowY: 'auto', overscrollBehavior: 'contain', padding: '14px 16px 28px', boxShadow: '0 -8px 32px rgba(0,0,0,0.7)', minHeight: 0 }}>
+      {/* Bottom drawer */}
+      <div style={{
+        flex: 1, background: '#141714',
+        borderTop: `2px solid ${accent}22`,
+        borderRadius: '18px 18px 0 0',
+        overflowY: 'auto', overscrollBehavior: 'contain',
+        padding: '14px 16px 28px',
+        boxShadow: '0 -8px 32px rgba(0,0,0,0.7)', minHeight: 0,
+      }}>
         <div style={{ width: 36, height: 4, borderRadius: 2, background: '#2e3330', margin: '0 auto 14px' }} />
 
         {/* ── STEP 1 ── */}
         <div style={{ display: step === 1 ? 'block' : 'none' }}>
           <SectionBadge text="SET YOUR START POINT" />
-          {mapsReady && <PlaceSearchBox placeholder="Search start location…" accentColor={accent} onPreview={(p) => handlePreviewPlace(p, 'start')} />}
-          {startPoint && <div style={{ fontSize: 12, color: accent, marginTop: 6, display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block', flexShrink: 0 }} />{startPoint.label}</div>}
+          {mapsReady && (
+            <PlaceSearchBox
+              placeholder="Search start location…"
+              accentColor={accent}
+              onPreview={(p) => handlePreviewPlace(p, 'start')}
+            />
+          )}
+          {startPoint && (
+            <div style={{ fontSize: 12, color: accent, marginTop: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block', flexShrink: 0 }} />
+              {startPoint.label}
+            </div>
+          )}
           {step === 1 && previewBannerJSX}
           <div style={{ padding: '14px', background: '#1a1e1a', borderRadius: 12, border: '1px solid #2a2e2a', marginTop: 12 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: accent, letterSpacing: '0.08em', marginBottom: 12 }}>START ZONE THRESHOLD · T1</div>
             <SliderRow label="Pickup Radius" sublabel="How far from start is 'at stop'" value={threshold1} onChange={setThreshold1} />
           </div>
-          <button onClick={() => setStep(2)} style={{ width: '100%', marginTop: 14, padding: '12px 0', borderRadius: 11, background: `linear-gradient(135deg, ${accent}, #00c97a)`, border: 'none', fontSize: 14, fontWeight: 700, color: '#051a0f', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: `0 4px 18px ${accent}44` }}>
+          <button
+            onClick={() => { setStep(2); stepRef.current = 2; }}
+            style={{
+              width: '100%', marginTop: 14, padding: '12px 0', borderRadius: 11,
+              background: `linear-gradient(135deg, ${accent}, #00c97a)`,
+              border: 'none', fontSize: 14, fontWeight: 700, color: '#051a0f',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              boxShadow: `0 4px 18px ${accent}44`,
+            }}>
             Set End Point <ChevronRight size={16} />
           </button>
         </div>
@@ -613,19 +705,45 @@ function RouteMapModal({ onClose, onSave, loading }) {
         {/* ── STEP 2 ── */}
         <div style={{ display: step === 2 ? 'block' : 'none' }}>
           <SectionBadge text="SET YOUR END POINT" />
-          {mapsReady && <PlaceSearchBox placeholder="Search end location…" accentColor={accent} onPreview={(p) => handlePreviewPlace(p, 'end')} />}
-          {endPoint && <div style={{ fontSize: 12, color: accent, marginTop: 6, display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block', flexShrink: 0 }} />{endPoint.label}</div>}
+          {mapsReady && (
+            <PlaceSearchBox
+              placeholder="Search end location…"
+              accentColor={accent}
+              onPreview={(p) => handlePreviewPlace(p, 'end')}
+            />
+          )}
+          {endPoint && (
+            <div style={{ fontSize: 12, color: accent, marginTop: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block', flexShrink: 0 }} />
+              {endPoint.label}
+            </div>
+          )}
           {step === 2 && previewBannerJSX}
           <div style={{ padding: '14px', background: '#1a1e1a', borderRadius: 12, border: '1px solid #2a2e2a', marginTop: 12 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: accent, letterSpacing: '0.08em', marginBottom: 12 }}>END ZONE THRESHOLD · T2</div>
             <SliderRow label="Drop-off Radius" sublabel="How far from end is 'arrived'" value={threshold2} onChange={setThreshold2} />
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            <button onClick={() => setStep(1)} style={{ flex: 1, padding: '12px 0', borderRadius: 11, background: 'transparent', border: '1.5px solid #2e3330', fontSize: 14, fontWeight: 500, color: '#888', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <button
+              onClick={() => { setStep(1); stepRef.current = 1; }}
+              style={{
+                flex: 1, padding: '12px 0', borderRadius: 11,
+                background: 'transparent', border: '1.5px solid #2e3330',
+                fontSize: 14, fontWeight: 500, color: '#888', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}>
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13 8H3M7 12L3 8L7 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
               Back
             </button>
-            <button onClick={() => setStep(3)} style={{ flex: 2, padding: '12px 0', borderRadius: 11, background: `linear-gradient(135deg, ${accent}, #00c97a)`, border: 'none', fontSize: 14, fontWeight: 700, color: '#051a0f', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: `0 4px 18px ${accent}44` }}>
+            <button
+              onClick={() => { setStep(3); stepRef.current = 3; }}
+              style={{
+                flex: 2, padding: '12px 0', borderRadius: 11,
+                background: `linear-gradient(135deg, ${accent}, #00c97a)`,
+                border: 'none', fontSize: 14, fontWeight: 700, color: '#051a0f',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                boxShadow: `0 4px 18px ${accent}44`,
+              }}>
               Continue to Details <ChevronRight size={16} />
             </button>
           </div>
@@ -645,7 +763,11 @@ function RouteMapModal({ onClose, onSave, loading }) {
                   <span style={{ fontSize: 9, fontWeight: 700, color: accent, letterSpacing: '0.06em' }}>START</span>
                 </div>
                 <div style={{ fontSize: 12, color: '#c8cec9', fontWeight: 500 }}>{startPoint?.label}</div>
-                <button onClick={() => setStep(1)} style={{ marginTop: 4, background: 'none', border: `1px solid ${accent}44`, borderRadius: 5, padding: '1px 7px', fontSize: 9, color: accent, cursor: 'pointer' }}>Edit</button>
+                <button
+                  onClick={() => { setStep(1); stepRef.current = 1; }}
+                  style={{ marginTop: 4, background: 'none', border: `1px solid ${accent}44`, borderRadius: 5, padding: '1px 7px', fontSize: 9, color: accent, cursor: 'pointer' }}>
+                  Edit
+                </button>
               </div>
               <div style={{ padding: '0 10px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 <div style={{ width: 40, height: 2, background: accent }} />
@@ -657,20 +779,33 @@ function RouteMapModal({ onClose, onSave, loading }) {
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: accent, boxShadow: `0 0 6px ${accent}` }} />
                 </div>
                 <div style={{ fontSize: 12, color: '#c8cec9', fontWeight: 500 }}>{endPoint?.label}</div>
-                <button onClick={() => setStep(2)} style={{ marginTop: 4, background: 'none', border: `1px solid ${accent}44`, borderRadius: 5, padding: '1px 7px', fontSize: 9, color: accent, cursor: 'pointer' }}>Edit</button>
+                <button
+                  onClick={() => { setStep(2); stepRef.current = 2; }}
+                  style={{ marginTop: 4, background: 'none', border: `1px solid ${accent}44`, borderRadius: 5, padding: '1px 7px', fontSize: 9, color: accent, cursor: 'pointer' }}>
+                  Edit
+                </button>
               </div>
             </div>
-            {routeDistance && <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #252a25', fontSize: 11, color: '#556', fontFamily: 'monospace' }}>🛣 {routeDistance} · {routeDuration}</div>}
+            {routeDistance && (
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #252a25', fontSize: 11, color: '#556', fontFamily: 'monospace' }}>
+                🛣 {routeDistance} · {routeDuration}
+              </div>
+            )}
           </div>
 
-          {/* Route Name — uncontrolled input via ref so typing never loses focus */}
+          {/* Route Name */}
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: '#445', letterSpacing: '0.08em', marginBottom: 8 }}>ROUTE NAME</div>
             <input
               ref={routeNameRef}
               defaultValue={routeName}
               placeholder="e.g. Morning Shift Route"
-              style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: `1.5px solid #2e3330`, background: '#1e2120', color: '#e0e0d8', fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
+              style={{
+                width: '100%', padding: '10px 14px', borderRadius: 10,
+                border: '1.5px solid #2e3330', background: '#1e2120',
+                color: '#e0e0d8', fontSize: 13, fontFamily: 'inherit',
+                outline: 'none', boxSizing: 'border-box',
+              }}
               onFocus={e => e.target.style.borderColor = accent}
               onBlur={e => e.target.style.borderColor = '#2e3330'}
             />
@@ -682,27 +817,51 @@ function RouteMapModal({ onClose, onSave, loading }) {
             <div style={{ position: 'relative', height: 22, display: 'flex', alignItems: 'center', marginBottom: 2 }}>
               <div style={{ position: 'absolute', left: 0, right: 0, height: 4, background: '#2a2e2a', borderRadius: 2 }} />
               <div style={{ position: 'absolute', left: 0, width: `${((threshold3 - 50) / (2000 - 50)) * 100}%`, height: 4, background: 'linear-gradient(90deg, #6c9fff88, #6c9fff)', borderRadius: 2 }} />
-              <input type="range" min={50} max={2000} step={25} value={threshold3} onChange={e => setThreshold3(Number(e.target.value))} style={{ position: 'absolute', left: 0, right: 0, width: '100%', opacity: 0, cursor: 'pointer', height: 22, margin: 0 }} />
-              <div style={{ position: 'absolute', left: `calc(${((threshold3 - 50) / (2000 - 50)) * 100}% - 10px)`, width: 20, height: 20, borderRadius: '50%', background: '#6c9fff', border: '3px solid #141714', boxShadow: '0 2px 10px #6c9fff88', pointerEvents: 'none' }} />
+              <input type="range" min={50} max={2000} step={25} value={threshold3} onChange={e => setThreshold3(Number(e.target.value))}
+                style={{ position: 'absolute', left: 0, right: 0, width: '100%', opacity: 0, cursor: 'pointer', height: 22, margin: 0 }} />
+              <div style={{
+                position: 'absolute', left: `calc(${((threshold3 - 50) / (2000 - 50)) * 100}% - 10px)`,
+                width: 20, height: 20, borderRadius: '50%', background: '#6c9fff',
+                border: '3px solid #141714', boxShadow: '0 2px 10px #6c9fff88', pointerEvents: 'none',
+              }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: 10, color: '#444', fontFamily: 'monospace' }}>50m</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#6c9fff', fontFamily: 'monospace', background: '#6c9fff18', border: '1px solid #6c9fff44', borderRadius: 7, padding: '2px 9px' }}>{threshold3 >= 1000 ? `${(threshold3 / 1000).toFixed(1)} km` : `${threshold3} m`}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#6c9fff', fontFamily: 'monospace', background: '#6c9fff18', border: '1px solid #6c9fff44', borderRadius: 7, padding: '2px 9px' }}>
+                {threshold3 >= 1000 ? `${(threshold3 / 1000).toFixed(1)} km` : `${threshold3} m`}
+              </span>
               <span style={{ fontSize: 10, color: '#444', fontFamily: 'monospace' }}>2km</span>
             </div>
           </div>
 
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setStep(2)} style={{ flex: 1, padding: '12px 0', borderRadius: 11, background: 'transparent', border: '1.5px solid #2e3330', fontSize: 14, fontWeight: 500, color: '#888', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <button
+              onClick={() => { setStep(2); stepRef.current = 2; }}
+              style={{
+                flex: 1, padding: '12px 0', borderRadius: 11,
+                background: 'transparent', border: '1.5px solid #2e3330',
+                fontSize: 14, fontWeight: 500, color: '#888', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}>
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13 8H3M7 12L3 8L7 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
               Back
             </button>
-            <button onClick={handleFinalSave} disabled={loading || fetchingRoute || !encodedPolyline} style={{ flex: 2, padding: '12px 0', borderRadius: 11, background: loading || fetchingRoute || !encodedPolyline ? '#2a2e2a' : 'linear-gradient(135deg, #6c9fff, #3a7bef)', border: 'none', fontSize: 14, fontWeight: 700, color: loading || fetchingRoute || !encodedPolyline ? '#556' : '#fff', cursor: loading || fetchingRoute || !encodedPolyline ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: loading || fetchingRoute || !encodedPolyline ? 'none' : '0 4px 18px #6c9fff44' }}>
+            <button
+              onClick={handleFinalSave}
+              disabled={loading || fetchingRoute || !encodedPolyline}
+              style={{
+                flex: 2, padding: '12px 0', borderRadius: 11,
+                background: loading || fetchingRoute || !encodedPolyline ? '#2a2e2a' : 'linear-gradient(135deg, #6c9fff, #3a7bef)',
+                border: 'none', fontSize: 14, fontWeight: 700,
+                color: loading || fetchingRoute || !encodedPolyline ? '#556' : '#fff',
+                cursor: loading || fetchingRoute || !encodedPolyline ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                boxShadow: loading || fetchingRoute || !encodedPolyline ? 'none' : '0 4px 18px #6c9fff44',
+              }}>
               {loading ? 'Saving…' : fetchingRoute ? 'Routing…' : <><CheckCircle size={14} /> Save Route</>}
             </button>
           </div>
         </div>
-
       </div>
 
       <style>{`
@@ -908,7 +1067,8 @@ function AreaMapModal({ onClose, onSave, loading }) {
         transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)',
         maxHeight: sheetOpen ? '60vh' : '48px', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', zIndex: 10,
       }}>
-        <div onTouchStart={(e) => { e.currentTarget._startY = e.touches[0].clientY; e.currentTarget._moved = false; }}
+        <div
+          onTouchStart={(e) => { e.currentTarget._startY = e.touches[0].clientY; e.currentTarget._moved = false; }}
           onTouchMove={(e) => { e.currentTarget._moved = true; }}
           onTouchEnd={(e) => { const dy = e.changedTouches[0].clientY - e.currentTarget._startY; if (Math.abs(dy) > 25) setSheetOpen(dy < 0); else if (!e.currentTarget._moved) setSheetOpen(o => !o); }}
           onClick={() => setSheetOpen(o => !o)}
