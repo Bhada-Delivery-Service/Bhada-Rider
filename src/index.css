@@ -692,21 +692,27 @@ html, body, #root {
 
 .metric-row-4 {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
 }
 
-@media (max-width: 360px) {
-  .metric-row-4 { grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 520px) {
+  .metric-row-4 { grid-template-columns: repeat(4, 1fr); }
 }
+
 
 .metric-card {
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: 14px 12px;
+  padding: 12px 10px;
+  min-width: 0;
+  overflow: hidden;
 }
 
+@media (min-width: 480px) {
+  .metric-card { padding: 14px 12px; }
+}
 .metric-label {
   font-size: 10px;
   font-weight: 600;
@@ -717,13 +723,15 @@ html, body, #root {
 }
 
 .metric-value {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 800;
   color: var(--text-0);
   line-height: 1;
   letter-spacing: -0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-
 .metric-sub { font-size: 11px; color: var(--text-2); margin-top: 3px; font-weight: 500; }
 
 /* ── Step List (onboarding) ─────────────────────────────────────────────── */
