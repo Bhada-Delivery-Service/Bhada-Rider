@@ -1,18 +1,23 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
+import { getAuth, signInWithCredential, PhoneAuthProvider, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyAe-PAuB9GlFX4YlJoFPrfJ9m-NPTW4Ejs',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'bhada-api.firebaseapp.com',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'bhada-api',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'bhada-api.firebasestorage.app',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '478743960698',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:478743960698:web:f20eee2387d9aa81e0efc3',
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || 'G-ZN80LXX0MP',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+
+export const isNative = Capacitor.isNativePlatform();
+
+let savedVerificationId = null;
 
 const clearRecaptcha = () => {
   if (window.recaptchaVerifier) {
@@ -22,23 +27,71 @@ const clearRecaptcha = () => {
 };
 
 export const sendOTP = async (phoneNumber, containerId = 'recaptcha-container') => {
-  clearRecaptcha();
-  const container = document.getElementById(containerId);
-  if (!container) throw new Error(`reCAPTCHA container #${containerId} not found`);
+  if (isNative) {
+    // ── ANDROID ──
+    const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+    await FirebaseAuthentication.removeAllListeners();
 
-  window.recaptchaVerifier = new RecaptchaVerifier(auth, container, {
-    size: 'invisible',
-    callback: () => {},
-    'expired-callback': clearRecaptcha,
-  });
+    const verificationIdPromise = new Promise((resolve, reject) => {
+      FirebaseAuthentication.addListener('phoneCodeSent', (event) => {
+        savedVerificationId = event.verificationId;
+        resolve(event.verificationId);
+      });
+      setTimeout(() => reject(new Error('OTP timeout')), 30000);
+    });
 
-  await window.recaptchaVerifier.render();
-  return signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
+    await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber });
+    await verificationIdPromise;
+    return true;
+
+  } else {
+    // ── WEB ──
+    clearRecaptcha();
+    const container = document.getElementById(containerId);
+    if (!container) throw new Error(`Container #${containerId} not found`);
+
+    window.recaptchaVerifier = new RecaptchaVerifier(auth, container, {
+      size: 'invisible',
+      callback: () => {},
+      'expired-callback': clearRecaptcha,
+    });
+
+    await window.recaptchaVerifier.render();
+    const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
+    return confirmationResult;
+  }
 };
 
-export const verifyOTP = async (confirmationResult, otp) => {
-  const result = await confirmationResult.confirm(otp);
-  return result.user.getIdToken();
+export const verifyOTP = async (confirmationResultOrOtp, otp) => {
+  if (isNative) {
+    // ── ANDROID ── ✅ Yeh part badlo
+    const otpStr = String(otp).trim();
+
+    if (!savedVerificationId) {
+      throw new Error('VerificationId nahi mila — pehle OTP bhejo');
+    }
+
+    const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+
+    // ✅ Sirf plugin se verify karo
+    const result = await FirebaseAuthentication.confirmVerificationCode({
+      verificationId: savedVerificationId,
+      verificationCode: otpStr,
+    });
+
+    // ✅ Plugin se idToken lo
+    const idToken = result?.user?.idToken 
+      || (await FirebaseAuthentication.getIdToken())?.token;
+
+    savedVerificationId = null;
+    return idToken;
+
+  } else {
+    // ── WEB ── ❌ Yeh mat badlo — same rahega
+    const otpStr = String(otp).trim();
+    const result = await confirmationResultOrOtp.confirm(otpStr);
+    return result.user.getIdToken();
+  }
 };
 
 export { clearRecaptcha };
