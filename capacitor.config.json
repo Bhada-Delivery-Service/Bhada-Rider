@@ -1,17 +1,30 @@
 {
-  "appId": "com.bhada.rider",
+  "appId": "com.bhadakaro.ride",
   "appName": "Bhada Rider",
   "webDir": "dist",
   "server": {
     "cleartext": true
   },
   "plugins": {
+     "FirebaseAuthentication": {
+      "skipNativeAuth": false,
+      "providers": ["phone"]
+    },
     "PushNotifications": {
-      "presentationOptions": ["badge", "sound", "alert"]
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert"
+      ]
     },
     "LocalNotifications": {
       "smallIcon": "ic_stat_icon_config_sample",
       "iconColor": "#00e5a0"
+    },
+    "GoogleAuth": {
+      "scopes": ["profile", "email"],
+      "serverClientId": "1060799826330-7jpe2h54akh30b8qs7ig1ssvblvrd8qf.apps.googleusercontent.com",
+      "forceCodeForRefreshToken": true
     }
   }
 }
