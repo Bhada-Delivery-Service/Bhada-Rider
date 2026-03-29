@@ -6,7 +6,7 @@ import { useOrders }         from '../hooks/useOrders';
 import { useNetworkStatus }  from '../hooks/useNetworkStatus';
 import { SkeletonDashboard } from '../components/ui/SkeletonLoader';
 import { useNavigate } from 'react-router-dom';
-
+import { MilestoneRewardBanner } from '../components/MilestoneRewardBanner';
 function getStatusConfig(t) {
   return {
     ONLINE:    { label: t('status_online'),   color: 'online',  dot: 'green'  },
@@ -315,7 +315,7 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
-
+      <MilestoneRewardBanner deliveries={performance?.totalDeliveries ?? 0} t={t} />
       <PerformanceSection performance={performance} t={t} />
       {isOnline && !isBlocked && <AvailableOrdersSection orders={placedOrders} t={t} navigate={navigate} />}
 
